@@ -1,0 +1,114 @@
+<!doctype html>
+<!--
+THESIS: Connection health at a glance, evidence one click away.
+OWN-WORLD: Charcoal surfaces, quiet rules, restrained blue controls and semantic status colors.
+STORY: Read status and timeline, explore trends, then open an incident's evidence.
+FIRST VIEWPORT: Compact navigation, a four-part status strip, a wide timeline and recent interruptions.
+FORM: UniFi/Starlink-inspired operational overview; details live on dedicated views, not a long landing page.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Linkwatch · Internet health</title>
+  <link rel="icon" type="image/svg+xml" href="mark.svg">
+  <link rel="stylesheet" href="style.css">
+  <script src="dashboard.js" defer></script>
+</head>
+<body>
+<main>
+  <header>
+    <a class="brand" href="#overview" aria-label="Linkwatch overview"><img src="mark.svg" width="32" height="32" alt=""><h1>Linkwatch</h1><span class="brand-description">Internet health</span></a>
+    <span id="last-check" class="subtle">Connecting to monitor…</span>
+  </header>
+  <div class="toolbar">
+    <nav aria-label="Dashboard views">
+      <button data-view="overview" aria-pressed="true">Overview</button>
+      <button data-view="trends" aria-pressed="false">Trends</button>
+      <button data-view="incidents" aria-pressed="false">Incidents</button>
+      <button data-view="settings" aria-pressed="false">Settings &amp; logs</button>
+    </nav>
+    <label class="range-label">Period <select id="range"><option value="300">5 minutes</option><option value="1800" selected>30 minutes</option><option value="3600">1 hour</option><option value="86400">24 hours</option><option value="604800">7 days</option></select></label>
+  </div>
+  <p id="connection-error" class="notice" role="alert" hidden></p>
+  <p id="history-error" class="notice" role="alert" hidden></p>
+  <section id="view-overview" aria-label="Connection overview">
+    <div class="health-strip">
+      <button class="health-item primary" id="open-checks" aria-controls="probe-details">
+        <span class="metric-label">Connection <span class="chevron" aria-hidden="true">↗</span></span>
+        <span class="status-heading"><i id="status-dot" class="dot unknown" aria-hidden="true"></i><strong id="current-title" aria-live="polite">Unknown</strong></span>
+        <span id="status-caption" class="subtle">Waiting for observations</span>
+      </button>
+      <button class="health-item" data-go="trends">
+        <span class="metric-label">Current latency <span class="chevron" aria-hidden="true">↗</span></span>
+        <strong id="current-latency">—</strong><span class="subtle">External TCP average</span>
+      </button>
+      <button class="health-item" data-go="incidents">
+        <span class="metric-label">Interruptions <span class="chevron" aria-hidden="true">↗</span></span>
+        <strong id="outage-count">—</strong><span id="outage-comparison" class="subtle">Selected period</span>
+      </button>
+      <button class="health-item" data-go="trends">
+        <span class="metric-label">Observed downtime <span class="chevron" aria-hidden="true">↗</span></span>
+        <strong id="downtime">—</strong><span id="coverage" class="subtle">Coverage unavailable</span>
+      </button>
+    </div>
+    <section class="panel timeline" aria-labelledby="timeline-title">
+      <div class="section-heading"><h2 id="timeline-title">Internet health</h2><span id="chart-scale" class="subtle">TCP latency</span></div>
+      <svg id="chart" viewBox="0 0 960 200" role="img" aria-labelledby="chart-title chart-description">
+        <title id="chart-title">Sampled connectivity and latency</title><desc id="chart-description">Waiting for history.</desc>
+      </svg>
+      <div class="axis"><span id="chart-start">—</span><span id="chart-end">Now</span></div>
+      <div class="chart-footer"><div class="legend"><span><i class="online"></i>Online</span><span><i class="degraded"></i>Degraded</span><span><i class="offline"></i>Unreachable</span><span><i class="unknown"></i>Unknown / gap</span></div><span id="chart-summary" class="subtle">Loading history…</span></div>
+      <details id="timeline-inspector"><summary>Inspect timeline</summary><label class="sr-only" for="bucket-selector">Select a sampled time bucket</label><input id="bucket-selector" type="range" min="0" max="0" value="0" disabled><p id="bucket-detail" class="subtle">Select a point on the chart or move the slider to inspect a time bucket.</p></details>
+    </section>
+    <details class="panel" id="probe-details"><summary>Connection details <span id="cadence" class="subtle"></span></summary>
+      <p id="status-detail" class="subtle">Waiting for probe evidence.</p>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Latest probe evidence"><table><thead><tr><th>Check</th><th>Result</th><th>Latency</th><th>Detail</th></tr></thead><tbody id="probes"></tbody></table></div>
+      <p id="sampling-note" class="subtle">Checks originate from Home Assistant. TCP reachability does not measure bandwidth, ICMP packet loss, or prove a failure's cause.</p>
+    </details>
+    <section class="panel" aria-labelledby="recent-title">
+      <div class="section-heading"><h2 id="recent-title">Recent interruptions</h2><button class="text-button" data-go="incidents">View all →</button></div>
+      <div id="recent-incidents" class="incident-list"><p class="subtle">Loading history…</p></div>
+    </section>
+  </section>
+  <section id="view-trends" aria-labelledby="trends-title" hidden>
+    <div class="page-heading"><h2 id="trends-title" tabindex="-1">Connection trends</h2><p class="subtle">Measured from retained history. Unobserved time is never counted as online.</p></div>
+    <dl id="trend-metrics" class="trend-metrics"></dl>
+    <section class="panel"><div class="section-heading"><h3>Previous period</h3><span id="comparison-label" class="subtle"></span></div><p id="comparison" class="subtle">Loading comparison…</p></section>
+    <section class="panel"><div class="section-heading"><h3 id="period-title">Over time</h3><span class="subtle">UTC boundaries · local labels</span></div>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Hourly or daily network trends"><table><thead><tr><th>Period start</th><th>Offline spans</th><th>Downtime</th><th>Degraded</th><th>Coverage</th><th>Mean / p95 TCP</th></tr></thead><tbody id="periods"></tbody></table></div>
+    </section>
+    <p class="subtle">p95 is the 95th percentile of each sample's mean successful external TCP time, not packet loss. A span crossing a period boundary appears in both rows.</p>
+  </section>
+  <section id="view-incidents" aria-labelledby="incidents-title" hidden>
+    <div class="page-heading"><h2 id="incidents-title" tabindex="-1">Incidents &amp; gaps</h2><p class="subtle">Raw observations, including brief failures that did not trigger a sound.</p></div>
+    <div class="section-heading"><label>Show <select id="incident-filter"><option value="all">All non-online states</option><option value="offline">Interruptions</option><option value="degraded">Degraded</option><option value="unknown">Unknown &amp; gaps</option></select></label><div class="exports"><a id="export-intervals" href="api/export.csv">Intervals CSV</a><a id="export-samples" href="api/export.csv?kind=samples">Samples CSV</a></div></div>
+    <section class="panel" id="incident-detail" aria-labelledby="detail-title" hidden>
+      <div class="section-heading"><h3 id="detail-title" tabindex="-1">Incident details</h3><div class="actions"><button id="reload-incident" class="text-button">Refresh details</button><button id="close-incident" class="text-button">Close details</button></div></div><div id="detail-body"></div>
+    </section>
+    <div class="panel incident-list" id="all-incidents"><p class="subtle">Loading history…</p></div>
+    <p id="incident-note" class="subtle"></p>
+    <p class="subtle">Durations estimate time between observations. Gaps split incidents; this app cannot know what happened while monitoring stopped.</p>
+  </section>
+  <section id="view-settings" aria-labelledby="settings-title" hidden>
+    <div class="page-heading"><h2 id="settings-title" tabindex="-1">Settings &amp; logs</h2><p class="subtle">Monitoring configuration is managed on the Home Assistant app's Configuration tab.</p></div>
+    <section class="panel">
+      <div class="section-heading"><h3>Alerts &amp; notifications</h3><div class="actions"><button id="mute" disabled>Mute alerts</button><button id="test-sound" disabled>Test alerts</button></div></div>
+      <p id="sound-status">Loading configuration…</p><p id="sound-error" class="notice" role="alert" hidden></p><p id="action-result" role="status"></p>
+      <details>
+        <summary>Setup &amp; delivery limitations</summary>
+        <p class="subtle">For a speaker on your Pi, set <code>sound_output: local</code> and <code>alerts_enabled: true</code> in app Configuration. Choose the analog/USB/HDMI output in the app's Audio settings, save and restart. A cable alone is not a speaker; use powered speakers. Output availability depends on your host.</p>
+        <p class="subtle">For Nest Hub use <code>sound_output: cast</code> and a Google Cast <code>media_player</code> entity; <code>both</code> requests both independently. Home Assistant's local URL must be fetchable by the Hub. Outage Cast playback is best effort: receiver launch may require WAN. Local audio does not depend on WAN or Cast but still requires working host audio. Playback can interrupt media; acceptance does not prove audible sound.</p>
+        <p class="subtle">For phone notifications, enter your Companion app's <code>notify.mobile_app_…</code> action in <code>phone_notify_service</code>, then enable alerts. Set <code>sound_output: none</code> for phone-only alerts. Normal push can fail during a home internet outage; Companion Local Push can work on the same functioning LAN when configured on the phone. Dashboard mute covers all outputs.</p>
+      </details>
+    </section>
+    <section class="panel"><h3>Devices</h3><p>Monitoring from Home Assistant</p><p class="subtle">Client telemetry is not connected. The app cannot identify which individual devices experienced internet problems. A future optional read-only UniFi connection can add client connection evidence.</p></section>
+    <section class="panel"><h3>History &amp; sampling</h3><p id="retention" class="subtle">Loading retention…</p><p class="subtle">Monitoring gaps, unknown evidence and stale samples are not uptime. Each chart column aggregates observations; click the chart for details. Exports follow the selected period.</p></section>
+    <details class="panel" id="event-details"><summary>Event log <span class="subtle">Latest 100 in selected period</span></summary><ol id="events" class="event-log"><li>No events loaded.</li></ol></details>
+  </section>
+  <footer><span>Linkwatch · Live internet health &amp; alerts</span><span id="footer-note">Waiting for fresh evidence</span></footer>
+  <noscript><p class="notice">Enable JavaScript for the live dashboard. History exports remain available at <a href="api/export.csv">intervals CSV</a> and <a href="api/export.csv?kind=samples">samples CSV</a>.</p></noscript>
+</main>
+</body>
+</html>

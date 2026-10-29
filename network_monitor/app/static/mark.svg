@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>Linkwatch</title>
+  <rect x="1" y="1" width="62" height="62" rx="16" fill="#173759"/>
+  <g fill="none" stroke="#6bb6ff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M24 18h-4C12 18 8 24 8 32s4 14 12 14h4"/>
+    <path d="M40 18h4c8 0 12 6 12 14s-4 14-12 14h-4"/>
+  </g>
+  <path d="M16 32h9l4-8 6 16 4-8h9" fill="none" stroke="#edf5ff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
