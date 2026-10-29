@@ -10,6 +10,7 @@ from aiohttp import web
 from .service import Monitor
 from .insights import incident, insights
 from .telemetry import SourceError, Telemetry
+from .activity import Activity
 
 STATIC = Path(__file__).parent / "static"
 
@@ -53,6 +54,9 @@ def create_app(monitor: Monitor, *, development=False,
         return response
 
     app = web.Application(middlewares=[ingress], client_max_size=1024)
+    activity = Activity(telemetry) if telemetry is not None else None
+    if activity:
+        app.on_cleanup.append(activity.close)
 
     async def status(request):
         return web.json_response(monitor.status(time.time()))
@@ -149,6 +153,29 @@ def create_app(monitor: Monitor, *, development=False,
             raise web.HTTPServiceUnavailable(text="Pi-hole connection unavailable") from None
         return web.json_response(result)
 
+    async def client_activity(request):
+        if activity is None:
+            raise web.HTTPServiceUnavailable(text="Telemetry collector not started")
+        try:
+            seconds = int(request.query.get("seconds", "1800"))
+        except ValueError:
+            raise web.HTTPBadRequest(text="Activity window must be integer seconds") from None
+        if seconds not in (1800, 3600, 86400):
+            raise web.HTTPBadRequest(text="Choose 1800, 3600 or 86400 activity seconds")
+        try:
+            return web.json_response(await activity.snapshot(request.match_info["key"], seconds))
+        except SourceError as exc:
+            raise web.HTTPServiceUnavailable(text=str(exc)) from None
+        except (aiohttp.ClientError, TimeoutError, ValueError, TypeError, KeyError):
+            raise web.HTTPServiceUnavailable(
+                text="Application traffic unavailable; check UniFi local credentials, permissions and API compatibility") from None
+
+    async def unifi_console(request):
+        if not monitor.config.unifi_url:
+            raise web.HTTPServiceUnavailable(text="Configure a UniFi HTTPS origin first")
+        # Only the configured, validated origin; never accept a redirect target from the request.
+        raise web.HTTPFound(location=monitor.config.unifi_url)
+
     async def discover(request):
         if telemetry is None:
             raise web.HTTPServiceUnavailable(text="Telemetry collector not started")
@@ -174,6 +201,8 @@ def create_app(monitor: Monitor, *, development=False,
     app.router.add_get("/api/traffic", traffic)
     app.router.add_get("/api/clients/{key}", client)
     app.router.add_get("/api/clients/{key}/dns", dns)
+    app.router.add_get("/api/clients/{key}/activity", client_activity)
+    app.router.add_get("/unifi-console", unifi_console)
     app.router.add_post("/api/discover", discover)
     app.router.add_post("/api/mute", mute)
     app.router.add_post("/api/test-sound", test_sound)

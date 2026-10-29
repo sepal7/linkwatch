@@ -1,5 +1,12 @@
 "use strict";
 let telemetryData = null, selectedClient = null, clientRequest = 0;
+let activityRequest = 0;
+const bytes = value => {
+  if (!Number.isFinite(value)) return "Unavailable";
+  const units = ["B", "kB", "MB", "GB", "TB"];
+  const index = Math.min(4, Math.floor(Math.log10(Math.max(1, value)) / 3));
+  return `${(value / 1000 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
+};
 const bps = value => Number.isFinite(value) ? `${(value / 1e6).toFixed(value < 1e6 ? 3 : 1)} Mbps` : "Unavailable";
 const sourceNames = {unifi: "UniFi official API", legacy: "UniFi legacy telemetry", pihole: "Pi-hole DNS", starlink: "Starlink · Home Assistant", internet: "Internet · Home Assistant sensors"};
 const telemetryMetricNames = {
@@ -43,7 +50,9 @@ function renderDevices() {
     const row = document.createElement("tr"), name = document.createElement("td");
     const button = text("button", client.name);
     button.addEventListener("click", () => openClient(client.key));
-    name.append(button, text("div", client.ip || "IP unavailable", "subtle"));
+    const activity = text("button", "Traffic & activity");
+    activity.addEventListener("click", () => openClient(client.key));
+    name.append(button, text("div", client.ip || "IP unavailable", "subtle"), activity);
     row.append(name, text("td", `${client.connection || "Unknown"}${client.signal_dbm != null ? ` · ${client.signal_dbm} dBm` : ""}`),
       text("td", client.stale ? "Unavailable" : `${bps(client.rx_bps)} / ${bps(client.tx_bps)}`),
       text("td", `${client.stale ? "Stale / not currently listed" : "Controller lists connected"} · ${formatTime(client.last_seen)}`));
@@ -60,6 +69,7 @@ function renderDevices() {
 }
 function renderSources(data) {
   telemetryData = data;
+  $("unifi-console-link").hidden = !data.sources.unifi.enabled && !data.sources.legacy.enabled;
   const sources = $("source-list"); sources.replaceChildren();
   for (const [name, source] of Object.entries(data.sources)) {
     if (!source.enabled) continue;
@@ -101,7 +111,15 @@ function renderSources(data) {
 async function openClient(key) {
   selectedClient = key;
   const request = ++clientRequest;
+  activityRequest++;
   $("client-detail").hidden = false; $("client-title").textContent = "Loading device…";
+  $("client-evidence-status").textContent = "Loading controller evidence…";
+  $("client-activity-results").hidden = true;
+  $("client-applications").replaceChildren(); $("client-categories").replaceChildren();
+  $("client-activity").disabled = true;
+  $("client-activity-note").textContent = telemetryData?.activity_enabled ?
+    "Loads only on request; the selected window applies to router applications, not DNS." :
+    "Enable unifi_activity_enabled in app Configuration, save and restart to allow application reads with your local read-only UniFi account.";
   $("client-body").replaceChildren(); $("client-queries").replaceChildren();
   $("client-dns-note").textContent = "DNS loads only on request; queries are not browsing history.";
   $("client-dns").disabled = true;
@@ -110,6 +128,7 @@ async function openClient(key) {
     if (request !== clientRequest) return;
     const client = data.client;
     $("client-title").textContent = client.name;
+    $("client-evidence-status").textContent = `${client.stale ? "Stale controller inventory" : "Controller lists connected"} · ${client.ip || "IP unavailable"} · ${client.connection || "Unknown connection"} · details read ${formatTime(Date.now() / 1000)}`;
     const body = $("client-body"), grid = document.createElement("dl"); grid.className = "detail-grid";
     for (const [label, value] of [["IP", client.ip], ["MAC", client.mac], ["Connection", client.connection],
       ["Controller RX", client.stale ? "Unavailable" : bps(client.rx_bps)], ["Controller TX", client.stale ? "Unavailable" : bps(client.tx_bps)],
@@ -136,13 +155,78 @@ async function openClient(key) {
     }
     if (!data.network_context.length) body.append(text("p", "No retained shared incidents overlap this binding window.", "subtle"));
     $("client-dns").disabled = client.stale || !telemetryData.sources.pihole.enabled;
+    $("client-activity").disabled = !activityAvailable();
+    if (telemetryData.activity_enabled && !telemetryData.sources.legacy.enabled) {
+      $("client-activity-note").textContent = "Configure the dedicated local read-only UniFi username and password under Sources to load application evidence.";
+    }
     $("client-title").focus({preventScroll: true});
   } catch (error) {
-    if (request === clientRequest) $("client-body").replaceChildren(text("p", error.message, "notice"));
+    if (request === clientRequest) {
+      $("client-evidence-status").textContent = `Device details unavailable: ${error.message}`;
+      $("client-body").replaceChildren();
+    }
+  }
+}
+function activityAvailable() {
+  const client = telemetryData?.clients.find(client => client.key === selectedClient);
+  return client && !client.stale && telemetryData.activity_enabled && telemetryData.sources.legacy.enabled;
+}
+function renderActivity(data) {
+  $("client-activity-results").hidden = false;
+  $("client-activity-note").textContent = `${formatTime(data.from)} – ${formatTime(data.to)} · fetched ${formatTime(data.fetched)}. Snapshot does not refresh automatically.`;
+  const body = $("client-applications"); body.replaceChildren();
+  const groups = new Map();
+  let total = 0, complete = true;
+  const applications = [...data.applications].sort((a, b) => (b.total_bytes ?? -1) - (a.total_bytes ?? -1));
+  for (const app of applications) {
+    const name = app.application || `Application ID ${app.application_id}`;
+    const category = app.category || `Category ID ${app.category_id}`;
+    const row = document.createElement("tr"), cell = text("td", name);
+    cell.append(text("div", category, "subtle"));
+    row.append(cell, text("td", bytes(app.total_bytes)),
+      text("td", `${bytes(app.received_bytes)} / ${bytes(app.transmitted_bytes)}`),
+      text("td", Number.isFinite(app.controller_activity_seconds) ?
+        `${duration(app.controller_activity_seconds)} · router estimate, not screen time` : "Not reported"));
+    body.append(row);
+    if (Number.isFinite(app.total_bytes)) total += app.total_bytes; else complete = false;
+    const group = groups.get(app.category_id) || {name: category, total: 0, complete: true};
+    if (Number.isFinite(app.total_bytes)) group.total += app.total_bytes; else group.complete = false;
+    groups.set(app.category_id, group);
+  }
+  $("activity-summary").textContent = applications.length ?
+    `${applications.length} reported application rows · ${complete ? bytes(total) + " summed reported bytes" : "Some byte totals unavailable"}. Not a complete WAN usage total.` :
+    "No visible application records. Traffic Identification, API support, permissions or classification delay may limit results; this does not prove no use.";
+  if (!applications.length) emptyRow(body, "No application activity returned by the controller.");
+  const categories = $("client-categories"); categories.replaceChildren();
+  for (const group of [...groups.values()].sort((a, b) => b.total - a.total)) {
+    const line = text("p", group.name);
+    line.append(text("strong", group.complete ? bytes(group.total) : "Incomplete totals")); categories.append(line);
+  }
+  if (!groups.size) categories.append(text("p", "No category measurements available.", "subtle"));
+  $("activity-limits").textContent = `${data.scope} ${data.warning} ${data.identity_note}${data.private_mac ? " This is a locally administered/private MAC." : ""}`;
+  if (data.catalog_error) $("client-activity-note").textContent += ` ${data.catalog_error}`;
+}
+async function loadClientActivity() {
+  const key = selectedClient, client = clientRequest, request = ++activityRequest;
+  const seconds = Number($("activity-window").value);
+  $("client-activity").disabled = true;
+  $("client-activity-results").hidden = true;
+  $("client-activity-note").textContent = "Reading this device's router-classified application snapshot…";
+  try {
+    const data = await api(`api/clients/${encodeURIComponent(key)}/activity?seconds=${seconds}`, undefined, 25000);
+    if (client !== clientRequest || request !== activityRequest) return;
+    renderActivity(data);
+  } catch (error) {
+    if (client === clientRequest && request === activityRequest) $("client-activity-note").textContent = `Router activity unavailable: ${error.message}`;
+  } finally {
+    if (client === clientRequest && request === activityRequest) {
+      $("client-activity").disabled = !activityAvailable();
+    }
   }
 }
 async function loadClientDNS() {
   const key = selectedClient, request = clientRequest;
+  $("client-queries").replaceChildren();
   $("client-dns").disabled = true; $("client-dns-note").textContent = "Loading up to 100 recent DNS requests…";
   try {
     const data = await api(`api/clients/${encodeURIComponent(key)}/dns`);
@@ -185,6 +269,13 @@ $("device-search").addEventListener("input", renderDevices);
 $("client-refresh").addEventListener("click", () => { if (selectedClient) openClient(selectedClient); });
 $("client-close").addEventListener("click", () => { clientRequest++; selectedClient = null; $("client-detail").hidden = true; $("devices-title").focus(); });
 $("client-dns").addEventListener("click", loadClientDNS);
+$("client-activity").addEventListener("click", loadClientActivity);
+$("activity-window").addEventListener("change", () => {
+  activityRequest++;
+  $("client-activity-results").hidden = true;
+  $("client-activity-note").textContent = "Window changed. Load router traffic & activity for a new snapshot.";
+  $("client-activity").disabled = !activityAvailable();
+});
 $("discover-sensors").addEventListener("click", async () => {
   $("discover-sensors").disabled = true;
   $("discovery-status").textContent = "Reading available traffic sensor candidates from Home Assistant…";

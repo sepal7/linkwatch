@@ -52,3 +52,11 @@ Ethernet connectivity, DNS decisions and controller association alone are not
 proof of a device's internet experience. Maintenance scripts and automatic
 updates are never modified. No private endpoints or device data belong in the
 public repository.
+
+Device activity extends this same visual world rather than replacing the outage
+dashboard. Opt-in router application snapshots and DNS decisions remain separate
+evidence streams with explicit periods. Traffic does not prove active gaming,
+screen time or viewed content. Application snapshots are briefly memory-only;
+no full destination capture, HTTPS interception or browsing profile is added.
+The user chose to manage blocking in UniFi for now: no write credentials or
+router control backend, only a configured-origin link for existing restrictions.

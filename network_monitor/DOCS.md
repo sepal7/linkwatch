@@ -7,6 +7,9 @@ unchanged for in-place upgrades.
 Optional router, DNS and internet-provider telemetry is described in
 [Connect data sources](CONNECTIONS.md). No particular router, DNS server or
 internet provider is required. All connectors default to off.
+For on-demand application evidence beside DNS, see
+[Device Traffic & activity](CONNECTIONS.md#device-traffic--activity).
+It is not a screen-time measurement or a full browsing history.
 
 ## Configuration
 

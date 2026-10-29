@@ -39,6 +39,7 @@ class Config:
     starlink_entities: list[str] = field(default_factory=list)
     internet_entities: list[str] = field(default_factory=list)
     ha_discovery_enabled: bool = False
+    unifi_activity_enabled: bool = False
 
     def __post_init__(self):
         bounds = {
@@ -52,7 +53,7 @@ class Config:
             value = getattr(self, name)
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(f"{name} must be an integer in {low}..{high}")
-        for name in ("alerts_enabled", "ha_discovery_enabled"):
+        for name in ("alerts_enabled", "ha_discovery_enabled", "unifi_activity_enabled"):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be boolean")
         for name in ("router_host", "dns_server", "dns_test_name",

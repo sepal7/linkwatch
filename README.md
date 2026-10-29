@@ -20,13 +20,16 @@ The first install builds locally and may take a few minutes.
 | Optional connection | What it adds |
 | --- | --- |
 | Home Assistant traffic sensors | Actual upload/download from your existing router or provider integration |
-| UniFi | Client inventory, equipment health and optional legacy client traffic statistics |
+| UniFi | Devices, equipment health and optional on-demand application/category traffic |
 | Pi-hole v6 | DNS totals and on-demand per-device queries and block decisions |
 | Starlink through Home Assistant | Dish traffic, latency, loss, obstruction, restart and update context |
 
 Open **Sources** to discover existing Home Assistant sensor candidates.
 Discovery is opt-in; it does not scan your LAN or change device settings.
 Every connector is optional and disabled by default.
+**Devices & activity** puts router application snapshots beside DNS decisions.
+Enable `unifi_activity_enabled` to use the local read-only connection. Traffic
+is evidence, not screen time or proof of what someone saw; manage blocks in UniFi.
 
 **[Connect data sources →](network_monitor/CONNECTIONS.md)**
 

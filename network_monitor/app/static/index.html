@@ -28,7 +28,7 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
       <button data-view="overview" aria-pressed="true">Overview</button>
       <button data-view="trends" aria-pressed="false">Trends</button>
       <button data-view="incidents" aria-pressed="false">Incidents</button>
-      <button data-view="devices" aria-pressed="false">Devices</button>
+      <button data-view="devices" aria-pressed="false">Devices &amp; activity</button>
       <button data-view="sources" aria-pressed="false">Sources</button>
       <button data-view="settings" aria-pressed="false">Settings &amp; logs</button>
     </nav>
@@ -88,7 +88,7 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
     </section>
   </section>
   <section id="view-devices" aria-labelledby="devices-title" hidden>
-      <div class="page-heading"><h2 id="devices-title" tabindex="-1">Devices</h2><p class="subtle">Controller evidence, DNS decisions and traffic together. A device's own internet experience is not directly measured.</p></div>
+      <div class="page-heading"><h2 id="devices-title" tabindex="-1">Device activity</h2><p class="subtle">One device, two sources of evidence. Compare router-classified applications with DNS decisions, without treating background traffic as screen time.</p></div>
       <section class="panel" id="devices-setup" hidden>
         <h3>Connect your controller to see devices</h3>
         <p>Device inventory currently comes from UniFi, not a LAN scan or Home Assistant sensor discovery. In Home Assistant, open Settings → Apps → Linkwatch → Configuration, enter <code>unifi_url</code> and <code>unifi_api_key</code>, then save and restart Linkwatch.</p>
@@ -99,9 +99,35 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
       <p id="devices-status" class="subtle" role="status">Loading optional inventory…</p>
       <section class="panel" id="client-detail" aria-labelledby="client-title" hidden>
         <div class="section-heading"><h3 id="client-title" tabindex="-1">Device details</h3><div class="actions"><button id="client-refresh">Refresh details</button><button id="client-close">Close</button></div></div>
+        <p id="client-evidence-status" class="subtle" role="status"></p>
+        <section class="device-evidence" aria-labelledby="activity-title">
+          <div class="section-heading"><h3 id="activity-title">Router applications</h3><label>Window <select id="activity-window"><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="86400">24 hours</option></select></label></div>
+          <p class="subtle">A controller snapshot, not all destination traffic or proof of what someone watched or played. Application labels can be wrong or missing.</p>
+          <button id="client-activity">Load router traffic &amp; activity</button>
+          <p id="client-activity-note" class="subtle" role="status">Loads only on request. Enable unifi_activity_enabled in app Configuration; the local read-only UniFi account is required.</p>
+          <div id="client-activity-results" hidden>
+            <p id="activity-summary"></p>
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Router application traffic"><table><thead><tr><th>Application / category</th><th>Reported bytes</th><th>Received / transmitted</th><th>Activity estimate</th></tr></thead><tbody id="client-applications"></tbody></table></div>
+            <p class="subtle">Received/transmitted are the API's reported byte counters, not verified internet-only download/upload. Decimal units: 1 MB = 1,000,000 bytes. Activity estimates are controller-defined, not measured foreground use.</p>
+            <details><summary>Category totals</summary><p class="subtle">Sum of returned application bytes per category, not all internet traffic or time spent.</p><div id="client-categories"></div></details>
+            <details><summary>Evidence and identity limits</summary><p id="activity-limits" class="subtle"></p></details>
+          </div>
+        </section>
+        <section class="device-evidence" aria-labelledby="dns-title">
+          <h3 id="dns-title">DNS activity</h3>
+          <p class="subtle">Pi-hole decisions, alongside router evidence. A permitted DNS answer is not proof of a page visit; a blocked domain is not an internet outage.</p>
+          <button id="client-dns">Load recent DNS activity</button><p id="client-dns-note" role="status" class="subtle">DNS is loaded only on request, not continuously copied.</p>
+          <div class="table-scroll" tabindex="0" role="region" aria-label="Recent DNS activity"><table><thead><tr><th>Time</th><th>Domain / type</th><th>DNS outcome</th><th>Reply</th></tr></thead><tbody id="client-queries"></tbody></table></div>
+        </section>
+        <section class="device-evidence" aria-labelledby="restrictions-title">
+          <h3 id="restrictions-title">Network restrictions</h3>
+          <p>Manage blocks and schedules in UniFi. Linkwatch does not change router or DNS rules, and these observations do not prove which rules currently apply.</p>
+          <a id="unifi-console-link" href="unifi-console" target="_blank" rel="noopener noreferrer" hidden>Manage restrictions in UniFi ↗</a>
+          <p class="subtle">Pause/resume is not available here: the controller's shared block flag cannot safely distinguish a Linkwatch block from an existing administrator restriction. A network block may also affect LAN access, not only internet.</p>
+        </section>
+        <details class="device-evidence"><summary>Connection details &amp; shared incidents</summary>
         <div id="client-body"></div>
-        <button id="client-dns">Load recent DNS activity</button><p id="client-dns-note" role="status" class="subtle">DNS is loaded only on request, not continuously copied.</p>
-        <div class="table-scroll" tabindex="0" role="region" aria-label="Recent DNS activity"><table><thead><tr><th>Time</th><th>Domain / type</th><th>DNS outcome</th><th>Reply</th></tr></thead><tbody id="client-queries"></tbody></table></div>
+        </details>
       </section>
       <div class="panel table-scroll" tabindex="0" role="region" aria-label="Network devices"><table><thead><tr><th>Device</th><th>Connection</th><th>Controller RX / TX</th><th>Evidence</th></tr></thead><tbody id="device-list"></tbody></table></div>
       <p class="subtle">Client RX/TX is controller-reported traffic and may include LAN transfers. It is not necessarily internet-only download/upload. Missing metrics are not zero.</p>
@@ -124,6 +150,7 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
         <h3>Devices and equipment · UniFi</h3>
         <p>Set <code>unifi_url</code> to your controller's HTTPS origin (no path) and <code>unifi_api_key</code> to a key from UniFi Network → Integrations. A single site needs no <code>unifi_site_id</code>. After restart, allow a polling cycle for devices to appear.</p>
         <p class="subtle">Optional traffic/signal: set <code>unifi_username</code> and <code>unifi_password</code> for a dedicated local read-only account. The official API alone does not provide those client metrics. Keep TLS verification on; for a self-signed certificate, use <code>unifi_tls_fingerprint</code> with a SHA-256 certificate fingerprint verified through a trusted channel.</p>
+        <p class="subtle">Optional application activity: enable <code>unifi_activity_enabled</code> to allow on-demand application reads with that read-only account. Enable Traffic Identification yourself in UniFi if desired; Linkwatch does not change it. The API key optionally supplies application/category names; otherwise IDs are shown. Snapshots stay in memory briefly, never in Linkwatch's database.</p>
         <h3>DNS activity · Pi-hole v6</h3>
         <p>Set <code>pihole_url</code> to the local HTTP/HTTPS origin (no /admin or /api path), and <code>pihole_password</code> to an application password from Pi-hole settings. This adds DNS totals; per-device queries also need a current, uniquely matched UniFi client IP.</p>
         <p class="subtle">Prefer HTTPS; HTTP credentials and DNS data travel unencrypted on your LAN. No maintenance, blocking, update or reboot commands are sent.</p>

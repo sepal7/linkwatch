@@ -70,6 +70,8 @@ class Telemetry:
         self.sources = {}
         self.session = None
         self.unifi_session = None
+        self.legacy_auth_lock = asyncio.Lock()
+        self.legacy_authenticated = False
         self.pihole_sid = None
         self.pihole_auth_lock = asyncio.Lock()
         self.previous_counters = {}
@@ -196,18 +198,29 @@ class Telemetry:
         return {"clients": devices, "infrastructure": stats, "infrastructure_total": len(infrastructure),
                 "capability": "Inventory; per-client traffic is not in this API"}
 
-    async def legacy(self):
+    async def legacy_request(self, path, **kwargs):
         base = self.config.unifi_url.rstrip("/")
-        if not self.unifi_session.cookie_jar:
-            await self.request(self.unifi_session, "POST", base + "/api/auth/login",
-                               json={"username": self.config.unifi_username,
-                                     "password": self.config.unifi_password}, ssl=self.fingerprint)
-        path = base + "/proxy/network/api/s/" + quote(self.config.unifi_legacy_site, safe="")
+        if self.unifi_session is None:
+            raise SourceError("UniFi local session is unavailable")
+        async with self.legacy_auth_lock:
+            if not self.legacy_authenticated:
+                await self.request(self.unifi_session, "POST", base + "/api/auth/login",
+                                   json={"username": self.config.unifi_username,
+                                         "password": self.config.unifi_password}, ssl=self.fingerprint)
+                self.legacy_authenticated = True
         try:
-            clients = await self.request(self.unifi_session, "GET", path + "/stat/sta",
-                                         ssl=self.fingerprint)
-            health = await self.request(self.unifi_session, "GET", path + "/stat/health",
-                                        ssl=self.fingerprint)
+            return await self.request(self.unifi_session, "GET", base + "/proxy/network" + path,
+                                      ssl=self.fingerprint, **kwargs)
+        except SourceError:
+            self.unifi_session.cookie_jar.clear()
+            self.legacy_authenticated = False
+            raise
+
+    async def legacy(self):
+        path = "/api/s/" + quote(self.config.unifi_legacy_site, safe="")
+        try:
+            clients = await self.legacy_request(path + "/stat/sta")
+            health = await self.legacy_request(path + "/stat/health")
         except SourceError:
             self.unifi_session.cookie_jar.clear()
             self.previous_counters.clear()
@@ -471,6 +484,7 @@ class Telemetry:
                    for row in self.devices.values()]
         return {"sources": sources, "clients": clients,
                 "discovery_enabled": self.config.ha_discovery_enabled,
+                "activity_enabled": self.config.unifi_activity_enabled,
                 "interval_seconds": self.config.telemetry_interval_seconds}
 
     def history(self, start, end):

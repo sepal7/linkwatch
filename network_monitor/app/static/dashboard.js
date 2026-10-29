@@ -25,9 +25,9 @@ function emptyRow(body, message, columns = 4) {
   row.append(cell);
   body.replaceChildren(row);
 }
-async function api(path, body) {
+async function api(path, body, timeout = 15000) {
   const response = await fetch(path, {
-    cache: "no-store", signal: AbortSignal.timeout(15000),
+    cache: "no-store", signal: AbortSignal.timeout(timeout),
     ...(body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json", "X-Network-Monitor": "1"}, body: JSON.stringify(body)})
   });
   if (!response.ok) throw new Error(`Request failed (${response.status}): ${(await response.text()).slice(0, 180)}`);

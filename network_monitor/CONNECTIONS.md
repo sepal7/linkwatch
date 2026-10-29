@@ -93,8 +93,9 @@ unifi_legacy_site: default
 
 Fill credentials only in your private app Configuration. The legacy connector
 can also run without an official API key.
-It authenticates using `/api/auth/login` then reads only
+It authenticates using `/api/auth/login` then reads inventory/health from
 `/proxy/network/api/s/{site}/stat/sta` and `/stat/health`.
+Opt-in on-demand application reads use the additional endpoint described below.
 No block, reconnect, reboot, upgrade, rule or configuration endpoints are called.
 It never changes maintenance/update settings.
 
@@ -110,6 +111,87 @@ if returned. Link speed is negotiated capacity, not actual throughput.
 Legacy endpoints are version-dependent and are not an official compatibility
 guarantee. A failure is isolated from official inventory and connectivity probes.
 No automatic alternate-account or insecure-login fallback is attempted.
+
+### Device Traffic & activity
+
+Set **`unifi_activity_enabled: true`**, save and restart. In **Devices & activity**,
+open a device, select a router window (30 minutes, 1 hour or 24 hours), then
+choose **Load router traffic & activity**. This uses the existing dedicated
+local **read-only** username/password, not a new write account. It is off by
+default. Existing DNS detail stays separate and loads with its own button.
+No new periodic per-device polling is introduced.
+
+The adapter follows the public `unpoller/unifi` implementation of the
+version-dependent UniFi v2 read API:
+
+```text
+GET /proxy/network/v2/api/site/{site}/traffic/{mac}
+    ?start={epoch_milliseconds}&end={epoch_milliseconds}
+    &includeUnidentified=true&mac={mac}
+```
+
+It reads `client_usage_by_app`, matching the exact current controller MAC, with
+up to 200 application rows. No matches/empty records mean **no visible evidence**,
+not zero use. Unsupported schemas, permissions or API versions are explicit
+errors. Traffic Identification must be available and enabled by you in UniFi;
+Linkwatch does not change it. Legacy `stat/stadpi` can be empty on newer
+controllers; it is not used as a fallback or proof of inactivity.
+
+The optional official API key enriches IDs with application/category names
+through filtered `GET /integration/v1/dpi/applications` and `/dpi/categories`.
+These official endpoints are **catalogs, not traffic measurements**. Without
+the key or a usable catalog, numeric IDs remain visible rather than invented
+labels. Classification can be incomplete, delayed or wrong.
+
+Received/transmitted fields follow the v2 API's `bytes_received` and
+`bytes_transmitted` exactly; they are not relabeled verified WAN download/upload.
+Byte totals use decimal kB/MB/GB, not bit rates. The table shows `total_bytes`
+only when reported, with category totals summed from returned application rows.
+Missing measurements remain unavailable. This endpoint does not expose a
+verified LAN/WAN split, complete remote destinations, every connection or every
+application. Do not equate it with all device-to-internet traffic.
+
+**Controller activity seconds are an opaque estimate**, not measured gaming,
+watching, browser foreground or screen time. They may include background
+transfers and may overlap across applications; do not sum them into time spent.
+The app does not infer a game's use from related DNS domains. It cannot reveal
+screen contents, full HTTPS URLs, videos or what a person actually saw. VPNs,
+encrypted DNS, caches, cloud gaming and unknown apps reduce visibility.
+
+The router's requested historical window can predate Linkwatch's current
+client/IP binding. In contrast, DNS reads are deliberately limited to the
+continuously observed unique IP binding. Both periods and fetch times are
+labeled independently. A MAC identifies a network interface, **not a person**;
+private/randomized MAC changes create separate identities. No name/IP guesses
+merge them. Stale inventory or a changed binding during a read rejects the
+activity result.
+
+Application snapshots are sensitive: at most 16 are cached in memory, reused
+for 30 seconds, and automatically evicted within 60 seconds even without
+another read. They never enter SQLite, CSV, app event logs or backups. Browser
+snapshots remain visible until replaced/closed and are labeled with their fetch
+time; anyone with access to the authorized dashboard may see them.
+
+### Managing existing restrictions
+
+The device view includes **Manage restrictions in UniFi**, opening only your
+configured HTTPS origin in a new tab. It does not submit a command, transfer
+Linkwatch credentials, select a device automatically or change a rule.
+
+This release remains read-only. Network 10.6.109's official client actions
+cover guest authorization, not parental pause/resume. Legacy `block-sta` uses a
+shared network-block flag without an ownership token: an app cannot safely
+distinguish its block from a later administrator restriction when unblocking.
+It is not a verified WAN-only pause and may affect LAN access too. Linkwatch
+therefore has **no write credentials, block/unblock backend, rule creation,
+automatic time limits or schedules**.
+
+DNS decisions are observed outcomes, not a complete list of effective router
+and DNS rules. Firewall policies, inheritance, schedule evaluation and
+application-specific restrictions are not synchronized or evaluated here.
+Manage existing UniFi and Pi-hole restrictions in their own interfaces;
+Linkwatch never claims that a displayed application bypassed a rule or that
+absence of traffic proves enforcement.
 
 ### TLS certificates
 
@@ -249,6 +331,9 @@ activity.
   Home Assistant dashboard users when the relevant connector is enabled.
 - DNS detail is memory-only, briefly cached and limited; do not share screenshots
   or logs without reviewing them. Backups and exports can be sensitive.
+- Optional application snapshots are memory-only and expire within 60 seconds;
+  no screen inspection, packet interception or persistent browsing profile is
+  created. The router retains its own independent history and settings.
 - No analytics service, cloud router login or telemetry upload is used.
   Existing external probes and optional phone/Cast alerts retain their documented
   provider/delivery limitations.
@@ -259,5 +344,7 @@ activity.
 
 - [Official UniFi local API](https://help.ui.com/hc/en-us/articles/30076656117655-Getting-Started-with-the-Official-UniFi-API)
 - [UniFi Network 10.6.109 OpenAPI](https://developer.ui.com/network/v10.6.109/openapi.json)
+- [Community UniFi v2 traffic adapter and schema](https://github.com/unpoller/unifi/blob/master/traffic.go)
+- [Community adapter path and millisecond parameters](https://github.com/unpoller/unifi/blob/master/types.go)
 - [Pi-hole API and version-specific local docs](https://docs.pi-hole.net/api/)
 - [Pi-hole session authentication](https://docs.pi-hole.net/api/auth/)

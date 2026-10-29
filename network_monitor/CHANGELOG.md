@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.3.0
+
+- Device Traffic & activity entry with on-demand router application/category
+  snapshots beside existing DNS decisions, in the same restrained local UI.
+- Opt-in `unifi_activity_enabled` uses the existing local read-only connection.
+  Windows: 30 minutes, 1 hour and 24 hours. Application payloads are not
+  persisted; a maximum of 16 snapshots are cached in memory for up to 60 seconds.
+- Explicit controller estimates, unknown fields, exact-MAC identity checks,
+  classification gaps and unsupported API states; no screen-time or complete
+  internet-destination claims.
+- Safe configured-origin link to manage restrictions in UniFi. No router write
+  credentials, pause/resume actions, rule edits or automatic enforcement.
+
 ## 1.2.2
 
 - Optional `pihole_tls_fingerprint` for HTTPS-only Pi-hole servers with

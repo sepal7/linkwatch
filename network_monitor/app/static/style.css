@@ -83,6 +83,10 @@ input[type="range"] { width: 100%; min-height: 28px; accent-color: var(--accent)
 .traffic-download { fill: none; stroke: var(--accent); stroke-width: 2; }
 .traffic-upload { fill: none; stroke: var(--online); stroke-width: 2; }
 .device-search { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.device-evidence { border-top: 1px solid var(--rule); padding-top: 20px; margin-top: 24px; }
+.device-evidence .section-heading { flex-wrap: wrap; }
+.device-evidence select { margin-left: 8px; }
+#client-categories p { display: flex; justify-content: space-between; gap: 16px; border-top: 1px solid var(--rule); padding-top: 10px; }
 input[type="search"] { background: var(--surface); color: var(--text); border: 1px solid var(--rule); border-radius: 5px; padding: 10px 12px; min-height: 44px; font: inherit; max-width: 100%; }
 #device-list button { background: none; border: 0; color: var(--accent); text-align: left; padding: 0 8px 0 0; overflow-wrap: anywhere; }
 #device-list td { max-width: 260px; overflow-wrap: anywhere; }
