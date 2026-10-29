@@ -32,7 +32,11 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
       <button data-view="sources" aria-pressed="false">Sources</button>
       <button data-view="settings" aria-pressed="false">Settings &amp; logs</button>
     </nav>
-    <label class="range-label">Period <select id="range"><option value="300">5 minutes</option><option value="1800" selected>30 minutes</option><option value="3600">1 hour</option><option value="86400">24 hours</option><option value="604800">7 days</option></select></label>
+    <label class="range-label">Period <select id="range">
+      <optgroup label="Minutes"><option value="60">1 minute</option><option value="300">5 minutes</option><option value="600">10 minutes</option><option value="900">15 minutes</option><option value="1800" selected>30 minutes</option></optgroup>
+      <optgroup label="Hours"><option value="3600">1 hour</option><option value="7200">2 hours</option><option value="10800">3 hours</option><option value="21600">6 hours</option><option value="43200">12 hours</option><option value="86400">24 hours</option></optgroup>
+      <optgroup label="Days"><option value="172800">2 days</option><option value="259200">3 days</option><option value="604800">7 days</option></optgroup>
+    </select></label>
   </div>
   <p id="connection-error" class="notice" role="alert" hidden></p>
   <p id="history-error" class="notice" role="alert" hidden></p>
@@ -85,6 +89,12 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
   </section>
   <section id="view-devices" aria-labelledby="devices-title" hidden>
       <div class="page-heading"><h2 id="devices-title" tabindex="-1">Devices</h2><p class="subtle">Controller evidence, DNS decisions and traffic together. A device's own internet experience is not directly measured.</p></div>
+      <section class="panel" id="devices-setup" hidden>
+        <h3>Connect your controller to see devices</h3>
+        <p>Device inventory currently comes from UniFi, not a LAN scan or Home Assistant sensor discovery. In Home Assistant, open Settings → Apps → Linkwatch → Configuration, enter <code>unifi_url</code> and <code>unifi_api_key</code>, then save and restart Linkwatch.</p>
+        <p class="subtle">Create the key in UniFi Network → Integrations. For traffic and signal details, optionally configure a dedicated local read-only account. Keep credentials in app Configuration, never in chat or GitHub.</p>
+        <button data-go="sources">See source setup</button>
+      </section>
       <label class="device-search">Find a device <input id="device-search" type="search" placeholder="Name, IP or connection" autocomplete="off"></label>
       <p id="devices-status" class="subtle" role="status">Loading optional inventory…</p>
       <section class="panel" id="client-detail" aria-labelledby="client-title" hidden>
@@ -103,16 +113,25 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
       <section class="panel">
         <div class="section-heading"><h3>Connect what you have</h3><button id="discover-sensors">Discover Home Assistant sensors</button></div>
         <p class="subtle">No particular router, DNS server or internet provider is required. Start with connection monitoring, then add only the sources you want.</p>
-        <p id="discovery-status" class="subtle" role="status">Optional: enable ha_discovery_enabled in app Configuration to find existing traffic sensors. No network scanning.</p>
+        <p id="discovery-status" class="subtle" role="status">To enable this button: Settings → Apps → Linkwatch → Configuration → set ha_discovery_enabled to true → Save → Restart. Discovery finds existing Home Assistant sensors only; it does not find every network device or configure connections.</p>
         <div id="discovery-results"></div>
         <details><summary>Available connectors</summary><p class="subtle">Any internet provider: map existing Home Assistant WAN rate sensors in internet_entities. UniFi: optional client inventory and legacy statistics. Pi-hole v6: optional DNS summary and query evidence. Starlink: optional Home Assistant dish sensors. Configure only the hardware you own; omitted connectors stay off.</p></details>
       </section>
       <section class="panel"><h3>Network equipment</h3><div id="infrastructure"><p class="subtle">Connect the official UniFi API to see available equipment statistics.</p></div></section>
-      <details class="panel"><summary>Connection setup</summary>
-        <p class="subtle">Enter endpoints and credentials only in the Home Assistant app's Configuration tab. Never paste secrets into GitHub. All integrations default to off.</p>
-        <p class="subtle">UniFi: local HTTPS URL and API key from Network → Integrations. For optional legacy counters, use a dedicated local read-only account. TLS verification stays on; a verified certificate SHA-256 fingerprint can pin a self-signed certificate.</p>
-        <p class="subtle">Pi-hole v6: local origin URL and an application password. Summary is polled slowly; device DNS queries load on demand. No filtering, maintenance, update or reboot commands are sent.</p>
-        <p class="subtle">Starlink: configure Home Assistant's official Starlink integration, then map its sensor entities in starlink_entities. Bypass setups may need a route configured by you. Linkwatch never reads location or sends restart/stow commands.</p>
+      <details class="panel" open><summary>Connection setup</summary>
+        <p>Leave this dashboard and open Home Assistant → Settings → Apps → Linkwatch → Configuration. Enter only the connections you want, then Save and Restart Linkwatch. These dashboard panels show results; they do not save credentials.</p>
+        <p class="subtle">All connections start off. No particular hardware is required. Keep secrets in app Configuration, never in chat or GitHub.</p>
+        <h3>Devices and equipment · UniFi</h3>
+        <p>Set <code>unifi_url</code> to your controller's HTTPS origin (no path) and <code>unifi_api_key</code> to a key from UniFi Network → Integrations. A single site needs no <code>unifi_site_id</code>. After restart, allow a polling cycle for devices to appear.</p>
+        <p class="subtle">Optional traffic/signal: set <code>unifi_username</code> and <code>unifi_password</code> for a dedicated local read-only account. The official API alone does not provide those client metrics. Keep TLS verification on; for a self-signed certificate, use <code>unifi_tls_fingerprint</code> with a SHA-256 certificate fingerprint verified through a trusted channel.</p>
+        <h3>DNS activity · Pi-hole v6</h3>
+        <p>Set <code>pihole_url</code> to the local HTTP/HTTPS origin (no /admin or /api path), and <code>pihole_password</code> to an application password from Pi-hole settings. This adds DNS totals; per-device queries also need a current, uniquely matched UniFi client IP.</p>
+        <p class="subtle">Prefer HTTPS; HTTP credentials and DNS data travel unencrypted on your LAN. No maintenance, blocking, update or reboot commands are sent.</p>
+        <h3>Internet traffic · Home Assistant sensors</h3>
+        <p>Add your router/provider integration in Home Assistant first. Enable <code>ha_discovery_enabled</code>, save and restart, then use discovery above to find candidate entity IDs. Map your whole-WAN rate sensors in <code>internet_entities</code>, for example <code>download=sensor.example_wan_download</code> and <code>upload=sensor.example_wan_upload</code>. Replace these examples with your own IDs, then save and restart again.</p>
+        <h3>Dish health · Starlink (optional)</h3>
+        <p>Add Home Assistant's official Starlink integration under Settings → Devices &amp; services first. Map its actual sensor IDs in <code>starlink_entities</code> using <code>metric=entity_id</code>, for example <code>latency=sensor.example_dish_ping</code>. Supported metrics: download, upload, latency, loss, connected, update, restart, obstructed and sleeping.</p>
+        <p class="subtle">Use only sensors your integration exposes. Bypass setups may need a route configured by you. Discovery does not create that route, and Linkwatch never sends restart/stow commands. Source errors appear above after configuration; missing data is not zero usage.</p>
       </details>
     </section>
   <section id="view-trends" aria-labelledby="trends-title" hidden>

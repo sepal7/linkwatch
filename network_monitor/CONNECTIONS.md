@@ -9,6 +9,14 @@ changes. Keep backups private: they contain app options and locally retained dat
 
 ## Discovery
 
+**If Devices and Sources are empty:** that is expected before setup. Open
+**Home Assistant → Settings → Apps → Linkwatch → Configuration**, enter the
+options for the sources you want, **Save**, then **Restart** Linkwatch. Source
+panels appear once configured; allow a polling cycle and check their errors.
+Devices currently require the UniFi connector below. Pi-hole adds DNS evidence,
+not a standalone device inventory. HA sensor discovery does not scan your LAN,
+create integrations or automatically connect to your router.
+
 The **Sources** view shows configured connections, their capabilities, last
 successful read and any errors. Unconfigured vendors do not clutter the dashboard.
 Connections are activated only by explicit configuration; discovery never enables

@@ -56,8 +56,10 @@ No optional router or DNS check is needed to start.
 
 The overview defaults to a **rolling 30 minutes**, not a full day. Status and
 graph refresh approximately every two seconds after each request finishes.
-Five-minute and one-hour views provide closer inspection; 24-hour and seven-day
-views are secondary options for investigating recurring problems. Summary
+Display periods include 1, 5, 10, 15 and 30 minutes; 1, 2, 3, 6, 12 and 24 hours;
+and 2, 3 and 7 days. Longer views help investigate recurring problems. Changing
+the display period does not change probe frequency or retention. Missing or
+expired history stays unobserved, not healthy uptime. Summary
 statistics refresh about every 15 seconds or when a new state interval appears.
 New installs probe every two seconds with a one-second timeout. Updating does
 not override existing options: for a faster cadence set `interval_seconds: 2`

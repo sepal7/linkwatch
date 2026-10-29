@@ -72,6 +72,45 @@ class TelemetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(parser.parents), 6)
         self.assertEqual(set(parser.parents.values()), {"main"})
 
+    async def test_dashboard_periods_and_setup_guidance(self):
+        class Periods(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.in_range, self.values, self.defaults = False, [], []
+
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if tag == "select":
+                    self.in_range = attrs.get("id") == "range"
+                if tag == "option" and self.in_range:
+                    self.values.append(int(attrs["value"]))
+                    if "selected" in attrs:
+                        self.defaults.append(int(attrs["value"]))
+
+            def handle_endtag(self, tag):
+                if tag == "select":
+                    self.in_range = False
+
+        html = (Path(__file__).resolve().parents[1] /
+                "network_monitor/app/static/index.html").read_text(encoding="utf-8")
+        parser = Periods()
+        parser.feed(html)
+        self.assertEqual(parser.values, [60, 300, 600, 900, 1800, 3600, 7200,
+                                         10800, 21600, 43200, 86400, 172800, 259200, 604800])
+        self.assertEqual(parser.defaults, [1800])
+        self.assertIn('id="devices-setup"', html)
+        self.assertIn("unifi_api_key", html)
+        self.assertIn("Save and Restart", html)
+        monitor = Monitor(self.config, self.store, Alerts(self.config, self.store, "", object()))
+        async with TestClient(TestServer(create_app(
+                monitor, development=True, telemetry=self.telemetry))) as client:
+            now = time.time()
+            for seconds in parser.values:
+                for endpoint in ("history", "insights", "traffic"):
+                    with self.subTest(seconds=seconds, endpoint=endpoint):
+                        response = await client.get(f"/api/{endpoint}?from={now-seconds}&to={now}")
+                        self.assertEqual(response.status, 200)
+
     def test_rates_reset_gaps_and_reboots_are_not_spikes_or_zero(self):
         t = self.telemetry
         self.assertEqual(t.rate("test", 0, 100, 100, 100), (None, None))

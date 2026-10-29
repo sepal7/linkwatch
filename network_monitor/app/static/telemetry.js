@@ -49,8 +49,14 @@ function renderDevices() {
       text("td", `${client.stale ? "Stale / not currently listed" : "Controller lists connected"} · ${formatTime(client.last_seen)}`));
     body.append(row);
   }
-  if (!body.children.length) emptyRow(body, "No matching devices. Configure a UniFi source under Sources.");
-  $("devices-status").textContent = `${telemetryData.clients.length} retained devices · telemetry target ${telemetryData.interval_seconds}s · details are snapshots`;
+  const inventoryConfigured = telemetryData.sources.unifi.enabled || telemetryData.sources.legacy.enabled;
+  $("devices-setup").hidden = inventoryConfigured;
+  if (!body.children.length) emptyRow(body, search ? "No devices match this search. Try another name, IP or connection." :
+    inventoryConfigured ? "No devices received yet. Check UniFi source status and errors under Sources." :
+    "No controller connected. Follow the setup above to load devices.");
+  $("devices-status").textContent = inventoryConfigured ?
+    `${telemetryData.clients.length} retained devices · telemetry target ${telemetryData.interval_seconds}s · details are snapshots` :
+    "Device inventory is not configured. Connection monitoring continues independently.";
 }
 function renderSources(data) {
   telemetryData = data;

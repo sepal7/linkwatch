@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.1
+
+- More display periods: 1, 10 and 15 minutes; 2, 3, 6 and 12 hours; 2 and 3 days.
+  The default remains 30 minutes; these do not change probe frequency or retention.
+- Visible, step-by-step source setup and a device-inventory connection guide.
+- Distinct messages for an unconfigured controller, empty inventory and searches
+  with no matches.
+
 ## 1.2.0
 
 - Optional local UniFi official inventory/equipment and legacy read-only
