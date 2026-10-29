@@ -1,5 +1,5 @@
 name: Linkwatch
-version: "1.2.1"
+version: "1.2.2"
 slug: home_network_monitor
 description: Local network health, traffic, device evidence and outage alerts
 url: https://github.com/sepal7/linkwatch
@@ -48,6 +48,7 @@ options:
   unifi_tls_fingerprint: ""
   pihole_url: ""
   pihole_password: ""
+  pihole_tls_fingerprint: ""
   starlink_entities: []
   internet_entities: []
   ha_discovery_enabled: false
@@ -78,6 +79,7 @@ schema:
   unifi_tls_fingerprint: str
   pihole_url: str
   pihole_password: password
+  pihole_tls_fingerprint: str
   starlink_entities:
     - str
   internet_entities:

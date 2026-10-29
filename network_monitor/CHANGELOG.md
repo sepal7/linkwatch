@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.2
+
+- Optional `pihole_tls_fingerprint` for HTTPS-only Pi-hole servers with
+  self-signed certificates. Normal verification remains the default; an exact
+  trusted SHA-256 pin applies to authentication, session renewal and DNS reads.
+- Distinguish connection refusal, TLS verification, certificate-pin mismatch
+  and timeout errors without exposing private connection details.
+
 ## 1.2.1
 
 - More display periods: 1, 10 and 15 minutes; 2, 3, 6 and 12 hours; 2 and 3 days.

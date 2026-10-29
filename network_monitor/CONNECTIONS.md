@@ -126,7 +126,23 @@ Set `pihole_url` to the local HTTP/HTTPS origin (no `/admin` or `/api` path) and
 `pihole_password` to an application password generated in Pi-hole's settings.
 Keep application-password write access disabled where supported. Linkwatch does
 not assume Pi-hole's permission settings provide a granular read-only token.
-HTTPS uses normal certificate verification. HTTP sends credentials and DNS data
+HTTPS uses normal certificate verification by default. For a self-signed local
+certificate, set `pihole_tls_fingerprint` to its **64 hexadecimal SHA-256
+certificate fingerprint**, verified through a trusted channel such as an
+authenticated SSH session on that host. Enter it without colons. The fingerprint
+requires an HTTPS URL and pins that exact certificate for authentication,
+summary and on-demand query requests, including reauthentication. A mismatched
+certificate is rejected; there is no verification-disabled fallback. Update the
+pin deliberately after verifying a renewed certificate. Leave it empty for
+normal certificate verification. Never copy a pin from an untrusted connection.
+
+An HTTPS-only server does not need HTTP enabled: keep its HTTPS URL. Connection
+refusal indicates an address/port/listener problem, not an incorrect password;
+TLS errors occur before API authentication. HTTP 401/403 instead indicates an
+authentication/authorization failure. Source errors distinguish these cases
+without exposing endpoints, passwords or certificate contents.
+
+HTTP sends credentials and DNS data
 unencrypted on the LAN; use only on a trusted network, preferably choose HTTPS.
 
 It uses `/api/auth` for session authentication, `GET /api/stats/summary` for

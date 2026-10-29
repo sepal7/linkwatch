@@ -35,6 +35,24 @@ def object_data(value):
     return value
 
 
+def tls_verification(fingerprint):
+    return aiohttp.Fingerprint(bytes.fromhex(fingerprint)) if fingerprint else True
+
+
+def connection_error(exc):
+    if isinstance(exc, aiohttp.ServerFingerprintMismatch):
+        return "TLS certificate fingerprint mismatch; verify the certificate through a trusted channel"
+    if isinstance(exc, (aiohttp.ClientConnectorCertificateError, aiohttp.ClientSSLError)):
+        return "TLS certificate verification failed; use a trusted certificate or a verified SHA-256 fingerprint"
+    if isinstance(exc, aiohttp.ClientConnectorError):
+        if isinstance(exc.os_error, ConnectionRefusedError):
+            return "Connection refused; check the configured scheme, port and that the API is listening"
+        return "Connection failed; check the configured address, name resolution and network reachability"
+    if isinstance(exc, TimeoutError):
+        return "Connection timed out; check network reachability and API availability"
+    return f"{type(exc).__name__}; check connection and API compatibility"
+
+
 def client_key(value):
     return hashlib.sha256(value.lower().encode()).hexdigest()[:24]
 
@@ -59,8 +77,8 @@ class Telemetry:
         self.devices = {}
         self.dns_lock = asyncio.Lock()
         self.dns_cache = {}
-        self.fingerprint = (aiohttp.Fingerprint(bytes.fromhex(config.unifi_tls_fingerprint))
-                            if config.unifi_tls_fingerprint else True)
+        self.fingerprint = tls_verification(config.unifi_tls_fingerprint)
+        self.pihole_fingerprint = tls_verification(config.pihole_tls_fingerprint)
         store.db.executescript("""
             CREATE TABLE IF NOT EXISTS telemetry (
                 id INTEGER PRIMARY KEY, ts REAL NOT NULL, source TEXT NOT NULL, data TEXT NOT NULL);
@@ -231,19 +249,27 @@ class Telemetry:
                 "wan_status": safe_text(wan.get("status")),
                 "capability": "Version-dependent counters; client RX/TX includes local traffic"}
 
+    async def pihole_request(self, method, path, **kwargs):
+        try:
+            return await self.request(
+                self.session, method, self.config.pihole_url.rstrip("/") + "/api/" + path,
+                ssl=self.pihole_fingerprint, **kwargs)
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise SourceError(connection_error(exc)) from None
+
     async def pihole_get(self, path, **params):
         async with self.pihole_auth_lock:
             if not self.pihole_sid:
-                auth = await self.request(
-                    self.session, "POST", self.config.pihole_url.rstrip("/") + "/api/auth",
+                auth = await self.pihole_request(
+                    "POST", "auth",
                     json={"password": self.config.pihole_password})
                 auth_session = object_data(auth.get("session"))
                 if not auth_session.get("valid") or not isinstance(auth_session.get("sid"), str):
                     raise SourceError("Pi-hole did not authorize an API session")
                 self.pihole_sid = auth_session["sid"]
         try:
-            return await self.request(
-                self.session, "GET", self.config.pihole_url.rstrip("/") + "/api/" + path,
+            return await self.pihole_request(
+                "GET", path,
                 headers={"X-FTL-SID": self.pihole_sid}, params=params)
         except SourceError:
             self.pihole_sid = None
@@ -389,8 +415,7 @@ class Telemetry:
                 result = await collect()
         except (aiohttp.ClientError, TimeoutError, SourceError, ValueError, TypeError, KeyError) as exc:
             # Never include raw exception text, URLs, credentials or response bodies.
-            message = str(exc) if isinstance(exc, SourceError) else (
-                f"{type(exc).__name__}; check connection, certificate and API compatibility")
+            message = str(exc) if isinstance(exc, SourceError) else connection_error(exc)
             if source["error"] != message:
                 self.store.log(time.time(), "source_error", f"{name}: {message}")
             source["error"] = message

@@ -35,6 +35,7 @@ class Config:
     unifi_tls_fingerprint: str = field(default="", repr=False)
     pihole_url: str = field(default="", repr=False)
     pihole_password: str = field(default="", repr=False)
+    pihole_tls_fingerprint: str = field(default="", repr=False)
     starlink_entities: list[str] = field(default_factory=list)
     internet_entities: list[str] = field(default_factory=list)
     ha_discovery_enabled: bool = False
@@ -98,16 +99,19 @@ class Config:
                 if prefix == "unifi" and parts.scheme != "https":
                     raise ValueError("UniFi requires HTTPS")
         for name in ("unifi_api_key", "unifi_username", "unifi_password",
-                     "pihole_password", "unifi_tls_fingerprint"):
+                     "pihole_password", "unifi_tls_fingerprint", "pihole_tls_fingerprint"):
             if not isinstance(getattr(self, name), str):
                 raise ValueError(f"{name} must be text")
         for name in ("unifi_site_id", "unifi_legacy_site"):
             if not isinstance(getattr(self, name), str) or not re.fullmatch(
                     r"[a-zA-Z0-9_-]{0,80}", getattr(self, name)):
                 raise ValueError(f"{name} must be a site identifier")
-        if self.unifi_tls_fingerprint and not re.fullmatch(
-                r"[a-fA-F0-9]{64}", self.unifi_tls_fingerprint):
-            raise ValueError("unifi_tls_fingerprint must be a SHA-256 certificate fingerprint")
+        for prefix in ("unifi", "pihole"):
+            fingerprint = getattr(self, prefix + "_tls_fingerprint")
+            if fingerprint and not re.fullmatch(r"[a-fA-F0-9]{64}", fingerprint):
+                raise ValueError(f"{prefix}_tls_fingerprint must be a SHA-256 certificate fingerprint")
+            if fingerprint and not getattr(self, prefix + "_url").startswith("https://"):
+                raise ValueError(f"{prefix}_tls_fingerprint requires an HTTPS URL")
         if bool(self.unifi_username) != bool(self.unifi_password):
             raise ValueError("Configure both UniFi read-only username and password")
         for name in ("starlink_entities", "internet_entities"):

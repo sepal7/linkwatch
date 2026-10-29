@@ -1,11 +1,16 @@
 import asyncio
 import json
+import hashlib
+import shutil
+import ssl
+import subprocess
 import tempfile
 import time
 import unittest
 from html.parser import HTMLParser
 from pathlib import Path
 from unittest.mock import AsyncMock
+from types import SimpleNamespace
 
 import aiohttp
 from aiohttp import web
@@ -42,12 +47,92 @@ class TelemetryTests(unittest.IsolatedAsyncioTestCase):
                 {"pihole_url": "http://user:password@dns.example"},
                 {"pihole_url": "http://dns.example/api"},
                 {"unifi_tls_fingerprint": "bad"},
+                {"pihole_tls_fingerprint": "bad"},
+                {"pihole_url": "https://dns.example", "pihole_tls_fingerprint": "a" * 63},
+                {"pihole_url": "http://dns.example", "pihole_tls_fingerprint": "a" * 64},
                 {"unifi_username": "readonly"},
                 {"starlink_entities": ["location=sensor.location"]},
                 {"starlink_entities": ["download=sensor.a", "download=sensor.b"]},
                 {"telemetry_interval_seconds": 2}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 Config(**kwargs)
+
+    def test_pihole_fingerprint_default_validation_and_privacy(self):
+        self.assertIs(self.telemetry.pihole_fingerprint, True)
+        config = Config(pihole_url="https://dns.example", pihole_tls_fingerprint="AB" * 32)
+        self.assertNotIn("AB" * 32, repr(config))
+        telemetry = Telemetry(config, self.store, "")
+        self.assertEqual(telemetry.pihole_fingerprint.fingerprint, bytes.fromhex("ab" * 32))
+
+    async def test_pihole_transport_errors_are_actionable_and_private(self):
+        key = SimpleNamespace(host="private.example", port=443, ssl=True)
+        for error, expected in (
+                (aiohttp.ClientConnectorError(key, ConnectionRefusedError(10061, "private secret")), "Connection refused"),
+                (aiohttp.ClientConnectorCertificateError(
+                    key, ssl.SSLCertVerificationError("private secret")), "TLS certificate verification failed"),
+                (aiohttp.ServerFingerprintMismatch(b"a", b"b", "private.example", 443), "fingerprint mismatch"),
+                (TimeoutError("private secret"), "timed out")):
+            with self.subTest(expected=expected):
+                self.telemetry.request = AsyncMock(side_effect=error)
+                await self.telemetry.poll_source("pihole", self.telemetry.pihole)
+                message = self.telemetry.sources["pihole"]["error"]
+                self.assertIn(expected, message)
+                self.assertNotIn("private", message)
+
+    @unittest.skipUnless(shutil.which("openssl"), "OpenSSL is needed to generate a temporary TLS fixture")
+    async def test_pihole_real_tls_pin_auth_renewal_queries_and_rejection(self):
+        root = Path(self.temp.name)
+        cert, key = root / "cert.pem", root / "key.pem"
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                        "-keyout", str(key), "-out", str(cert), "-days", "1",
+                        "-subj", "/CN=localhost"], check=True, capture_output=True)
+        fingerprint = hashlib.sha256(
+            ssl.PEM_cert_to_DER_cert(cert.read_text(encoding="ascii"))).hexdigest()
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(cert, key)
+        calls, expired = [], False
+
+        async def handler(request):
+            nonlocal expired
+            calls.append((request.method, request.path))
+            if request.path == "/api/auth":
+                self.assertEqual((await request.json())["password"], "synthetic-password")
+                return web.json_response({"session": {"valid": True, "sid": "synthetic-session"}})
+            self.assertEqual(request.headers["X-FTL-SID"], "synthetic-session")
+            if request.path == "/api/queries" and not expired:
+                expired = True
+                return web.json_response({}, status=401)
+            return web.json_response({"queries": []})
+
+        app = web.Application()
+        app.router.add_route("*", "/api/{path:.*}", handler)
+        server = TestServer(app, scheme="https")
+        await server.start_server(ssl=context)
+        try:
+            config = Config(pihole_url=str(server.make_url("/")).rstrip("/"),
+                            pihole_password="synthetic-password",
+                            pihole_tls_fingerprint=fingerprint)
+            telemetry = Telemetry(config, self.store, "")
+            async with aiohttp.ClientSession() as session:
+                telemetry.session = session
+                await telemetry.pihole_get("stats/summary")
+                with self.assertRaisesRegex(SourceError, "HTTP 401"):
+                    await telemetry.pihole_get("queries")
+                self.assertIsNone(telemetry.pihole_sid)
+                await telemetry.pihole_get("queries")
+                self.assertEqual(calls, [
+                    ("POST", "/api/auth"), ("GET", "/api/stats/summary"),
+                    ("GET", "/api/queries"), ("POST", "/api/auth"), ("GET", "/api/queries")])
+                for pin, expected in (("", "TLS certificate verification failed"),
+                                      ("00" * 32, "fingerprint mismatch")):
+                    rejected = Telemetry(Config(
+                        pihole_url=config.pihole_url, pihole_tls_fingerprint=pin), self.store, "")
+                    rejected.session = session
+                    with self.assertRaisesRegex(SourceError, expected):
+                        await rejected.pihole_get("stats/summary")
+                self.assertEqual(len(calls), 5)
+        finally:
+            await server.close()
 
     def test_dashboard_views_are_siblings_not_hidden_inside_each_other(self):
         class Views(HTMLParser):
