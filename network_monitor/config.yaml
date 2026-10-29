@@ -1,7 +1,7 @@
 name: Linkwatch
-version: "1.1.1"
+version: "1.2.0"
 slug: home_network_monitor
-description: Live internet health, outage history, speaker alerts and phone notifications
+description: Local network health, traffic, device evidence and outage alerts
 url: https://github.com/sepal7/linkwatch
 arch:
   - aarch64
@@ -38,6 +38,19 @@ options:
   sound_output: cast
   media_player: ""
   phone_notify_service: ""
+  telemetry_interval_seconds: 15
+  unifi_url: ""
+  unifi_api_key: ""
+  unifi_site_id: ""
+  unifi_username: ""
+  unifi_password: ""
+  unifi_legacy_site: default
+  unifi_tls_fingerprint: ""
+  pihole_url: ""
+  pihole_password: ""
+  starlink_entities: []
+  internet_entities: []
+  ha_discovery_enabled: false
 schema:
   interval_seconds: int(2,300)
   timeout_seconds: int(1,10)
@@ -55,3 +68,18 @@ schema:
   sound_output: list(local|cast|both|none)
   media_player: str
   phone_notify_service: str
+  telemetry_interval_seconds: int(10,300)
+  unifi_url: str
+  unifi_api_key: password
+  unifi_site_id: str
+  unifi_username: str
+  unifi_password: password
+  unifi_legacy_site: str
+  unifi_tls_fingerprint: str
+  pihole_url: str
+  pihole_password: password
+  starlink_entities:
+    - str
+  internet_entities:
+    - str
+  ha_discovery_enabled: bool

@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.0
+
+- Optional local UniFi official inventory/equipment and legacy read-only
+  telemetry, with explicit missing-field and stale-source states.
+- Optional Pi-hole v6 summary and on-demand, bounded DNS detail tied to a
+  continuously observed unique client/IP binding.
+- Generic Home Assistant internet sensors and optional Starlink sensors for
+  traffic and dish health, including update/restart context without claiming
+  an outage's cause.
+- Opt-in discovery of existing HA traffic sensor candidates; no LAN scanning
+  or automatic configuration changes.
+- Consolidated traffic, device details, observed connection changes and Sources
+  views; bounded local numeric history, no persistent DNS query copy.
+- Shorter public README and separate connection/privacy documentation.
+
 ## 1.1.1
 
 - Moved the public repository to `sepal7/linkwatch` and updated installation

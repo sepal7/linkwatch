@@ -14,6 +14,7 @@ from .config import Config
 from .service import Monitor
 from .storage import Store
 from .web import create_app
+from .telemetry import Telemetry
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,14 +41,17 @@ async def serve(args):
             alerts.media_ready = False
             alerts.error(time.time(), f"Cannot prepare local sound files: {exc}")
         monitor = Monitor(config, store, alerts)
-        app = create_app(monitor, development=args.development)
+        telemetry = Telemetry(config, store, os.environ.get("SUPERVISOR_TOKEN", ""))
+        app = create_app(monitor, development=args.development, telemetry=telemetry)
         runner = web.AppRunner(app, access_log=None)
         await runner.setup()
         site = web.TCPSite(runner, "127.0.0.1" if args.development else "0.0.0.0", args.port)
         await site.start()
-        tasks = [asyncio.create_task(monitor.run()), asyncio.create_task(alerts.run())]
+        tasks = [asyncio.create_task(monitor.run()), asyncio.create_task(alerts.run()),
+                 asyncio.create_task(telemetry.run())]
         tasks[0].add_done_callback(monitor.completed)
         tasks[1].add_done_callback(alerts.completed)
+        tasks[2].add_done_callback(telemetry.completed)
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):

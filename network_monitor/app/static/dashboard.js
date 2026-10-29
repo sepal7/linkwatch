@@ -34,7 +34,7 @@ async function api(path, body) {
   return response.json();
 }
 function navigate(view, focus = false) {
-  const allowed = ["overview", "trends", "incidents", "settings"];
+  const allowed = ["overview", "trends", "incidents", "devices", "sources", "settings"];
   if (!allowed.includes(view)) view = "overview";
   for (const name of allowed) $("view-" + name).hidden = name !== view;
   for (const button of document.querySelectorAll("[data-view]")) button.setAttribute("aria-pressed", String(button.dataset.view === view));

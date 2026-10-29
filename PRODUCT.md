@@ -44,5 +44,11 @@ UniFi/Starlink-inspired interface: concise status, a rolling last-30-minute grap
 and details on click rather than long explanations on the overview. Fast live
 error visibility is primary; historical trends are secondary. Dark neutral
 surfaces and restrained blue controls follow their supplied references.
-Client telemetry is not connected, and Ethernet connectivity alone is not a
-source of device-specific internet failure evidence.
+Optional read-only UniFi and Pi-hole collectors add controller and DNS evidence;
+generic Home Assistant rate sensors support any provider, and optional Starlink
+sensors add dish context. No vendor is required. Opt-in discovery lists candidate
+HA sensors without scanning the LAN or enabling connections automatically.
+Ethernet connectivity, DNS decisions and controller association alone are not
+proof of a device's internet experience. Maintenance scripts and automatic
+updates are never modified. No private endpoints or device data belong in the
+public repository.

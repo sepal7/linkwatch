@@ -3,6 +3,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,19 @@ class Config:
     sound_output: str = "cast"
     media_player: str = ""
     phone_notify_service: str = ""
+    telemetry_interval_seconds: int = 15
+    unifi_url: str = field(default="", repr=False)
+    unifi_api_key: str = field(default="", repr=False)
+    unifi_site_id: str = ""
+    unifi_username: str = field(default="", repr=False)
+    unifi_password: str = field(default="", repr=False)
+    unifi_legacy_site: str = "default"
+    unifi_tls_fingerprint: str = field(default="", repr=False)
+    pihole_url: str = field(default="", repr=False)
+    pihole_password: str = field(default="", repr=False)
+    starlink_entities: list[str] = field(default_factory=list)
+    internet_entities: list[str] = field(default_factory=list)
+    ha_discovery_enabled: bool = False
 
     def __post_init__(self):
         bounds = {
@@ -31,13 +45,15 @@ class Config:
             "router_port": (1, 65535), "retention_days": (1, 90),
             "max_samples": (1000, 1000000),
             "alert_failure_seconds": (0, 600), "alert_recovery_seconds": (0, 600),
+            "telemetry_interval_seconds": (10, 300),
         }
         for name, (low, high) in bounds.items():
             value = getattr(self, name)
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(f"{name} must be an integer in {low}..{high}")
-        if type(self.alerts_enabled) is not bool:
-            raise ValueError("alerts_enabled must be boolean")
+        for name in ("alerts_enabled", "ha_discovery_enabled"):
+            if type(getattr(self, name)) is not bool:
+                raise ValueError(f"{name} must be boolean")
         for name in ("router_host", "dns_server", "dns_test_name",
                      "media_player", "sound_output", "phone_notify_service"):
             if not isinstance(getattr(self, name), str):
@@ -69,6 +85,45 @@ class Config:
             raise ValueError("Enabled Cast alerts require media_player")
         if self.alerts_enabled and self.sound_output == "none" and not self.phone_notify_service:
             raise ValueError("Enable at least one alert output")
+        for prefix in ("unifi", "pihole"):
+            url = getattr(self, prefix + "_url")
+            if not isinstance(url, str):
+                raise ValueError(f"{prefix}_url must be text")
+            if url:
+                parts = urlsplit(url)
+                if (parts.scheme not in ("http", "https") or not parts.hostname or
+                        parts.username or parts.password or parts.query or parts.fragment or
+                        parts.path not in ("", "/")):
+                    raise ValueError(f"{prefix}_url must be an origin without credentials or path")
+                if prefix == "unifi" and parts.scheme != "https":
+                    raise ValueError("UniFi requires HTTPS")
+        for name in ("unifi_api_key", "unifi_username", "unifi_password",
+                     "pihole_password", "unifi_tls_fingerprint"):
+            if not isinstance(getattr(self, name), str):
+                raise ValueError(f"{name} must be text")
+        for name in ("unifi_site_id", "unifi_legacy_site"):
+            if not isinstance(getattr(self, name), str) or not re.fullmatch(
+                    r"[a-zA-Z0-9_-]{0,80}", getattr(self, name)):
+                raise ValueError(f"{name} must be a site identifier")
+        if self.unifi_tls_fingerprint and not re.fullmatch(
+                r"[a-fA-F0-9]{64}", self.unifi_tls_fingerprint):
+            raise ValueError("unifi_tls_fingerprint must be a SHA-256 certificate fingerprint")
+        if bool(self.unifi_username) != bool(self.unifi_password):
+            raise ValueError("Configure both UniFi read-only username and password")
+        for name in ("starlink_entities", "internet_entities"):
+            mappings = getattr(self, name)
+            if not isinstance(mappings, list) or len(mappings) > 10:
+                raise ValueError(f"{name} must be a list of at most 10 metric=entity entries")
+            keys = set()
+            for mapping in mappings:
+                if not isinstance(mapping, str) or not re.fullmatch(
+                        r"(download|upload|latency|loss|connected|update|restart|obstructed|sleeping)"
+                        r"=(sensor|binary_sensor)\.[a-z0-9_]+", mapping):
+                    raise ValueError(f"Invalid {name} metric=entity mapping")
+                key = mapping.split("=")[0]
+                if key in keys:
+                    raise ValueError(f"Duplicate {name} metric mapping")
+                keys.add(key)
 
     @property
     def stale_after(self):

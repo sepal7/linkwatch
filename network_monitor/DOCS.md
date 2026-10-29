@@ -4,6 +4,10 @@ Live internet health, outage history, and local or Nest Hub sound alerts.
 Formerly Home Network Monitor; the internal slug and history location are
 unchanged for in-place upgrades.
 
+Optional router, DNS and internet-provider telemetry is described in
+[Connect data sources](CONNECTIONS.md). No particular router, DNS server or
+internet provider is required. All connectors default to off.
+
 ## Configuration
 
 The defaults are enough to begin observing external connectivity. Change options
@@ -98,11 +102,12 @@ that window. Details are a snapshot; **Refresh details** reloads current evidenc
 Sound events are shown from 30 seconds before through 10 minutes after the
 interval and may include another incident or a test sound. They are labeled
 nearby events, not causally attributed delivery. A monitoring gap has no probe
-evidence. Device telemetry is not connected; no client-impact claims are made.
+evidence. Optional device telemetry is separate evidence; shared incidents do not
+prove that a particular client lost internet access.
 
 Phone alerts use the configured `notify.mobile_app_...` action through Core's
 supported API, with the same debounce as sound. See
-[phone setup and Local Push limitations](../README.md#phone-notifications).
+[phone setup and Local Push limitations](#phone-notifications).
 An empty `phone_notify_service` disables phone requests. Use `sound_output: none`
 and a phone action for phone-only alerts. Dashboard mute covers all outputs.
 Test requests are labeled as tests; a phone notification is not presented as
@@ -146,7 +151,7 @@ they are not evidence of network uptime.
 ### Sound delivery
 
 For a speaker on your Pi, follow the
-[host speaker setup](../README.md#pi--host-speaker-setup). Set `sound_output: local`,
+[host speaker setup](#host-speaker-setup). Set `sound_output: local`,
 enable alerts and select an available analog/USB/HDMI output in the app page's
 Audio settings. The Pi has no internal speaker. Local playback uses `paplay`
 through Supervisor's PulseAudio setup; no external token, network media fetch
@@ -154,7 +159,7 @@ or Cast receiver is involved. No automatic cable detection is attempted.
 Audio still needs working speakers, volume and supported host hardware. Local
 test success is not a listening test.
 
-For Cast, follow the [Nest Hub setup](../README.md#nest-hub-setup).
+For Cast, follow the [Nest Hub setup](#nest-hub-setup).
 The app uses the Supervisor-provided token only for the internal Core API and calls:
 
 ```yaml
@@ -180,6 +185,65 @@ tokens, sound preparation errors, queue overflow and accepted requests.
 “Accepted” means Home Assistant accepted the action, not that audible delivery
 was verified. The app cannot detect physical silence, muted volume or a Cast
 receiver's internet dependency.
+
+### Host speaker setup
+
+The Pi has no internal speaker. Connect powered speakers to a supported
+3.5 mm, USB or HDMI output; a cable alone makes no sound.
+
+1. Set `sound_output: local` and `alerts_enabled: true` in app Configuration.
+2. Select your output under **Audio** on the app page. If analog/headphones is
+   not exposed by your host OS, use a supported USB audio adapter or HDMI.
+3. Save, restart and use **Settings & logs → Test alerts**. Listen at the speaker
+   and confirm its power, volume and mute settings.
+
+Local playback needs no WAN and does not automatically detect a cable. A
+stopped host, power loss or failed speaker prevents it. Linkwatch cannot
+force-enable unsupported audio hardware.
+
+### Nest Hub setup
+
+1. Add your device with Home Assistant's **Google Cast** integration and find
+   its `media_player` entity under **Settings → Devices & services**.
+2. Check **Media → My media**. The app creates `home-network-monitor/down.wav`
+   and `recovery.wav` in Home Assistant's media directory.
+3. Set a local Home Assistant URL under **Settings → System → Network** that
+   the Hub can fetch, typically `http://<HA-LAN-IP>:8123`. Cast may not resolve
+   local hostnames. HTTPS requires a trusted, matching certificate.
+4. Configure `sound_output: cast`, your `media_player` entity and
+   `alerts_enabled: true`. Save, restart, test and listen. Use `both` for
+   independent host-speaker and Cast requests.
+
+Home Assistant resolves the `media-source://` URI to a signed fetchable URL;
+the Hub does not fetch sound through authenticated ingress. No cloud TTS,
+external bearer token or extra automation is required.
+
+**WAN-outage sound is best effort.** The default Cast receiver may need internet
+to launch even for local audio. LAN/Wi-Fi/router failure also prevents delivery.
+Playback may interrupt existing media; the app neither restores it nor adjusts
+volume. Test your actual Hub during a controlled WAN-only outage. This is not a
+safety alarm, and a Hub browser dashboard is not promised.
+
+### Phone notifications
+
+1. Sign in with the Home Assistant Companion app and allow phone notifications.
+2. Find and manually test `notify.mobile_app_<your_phone>` in **Developer tools
+   → Actions**.
+3. Set that exact action in `phone_notify_service` and enable `alerts_enabled`.
+   Use `sound_output: none` for phone-only, or `local` for host speakers too.
+   Save, restart and use **Test alerts**.
+
+Foreground use is not required, but phone permissions and background restrictions
+still apply. Ordinary push may require home internet and fail or arrive late
+during an outage. **Companion Local Push** can work without WAN while the phone
+and Home Assistant remain on a working LAN; configure and test it separately.
+Android persistent-connection/battery settings and iOS internal URL/Wi-Fi SSIDs
+matter. See [Companion Local Push](https://companion.home-assistant.io/docs/notifications/local).
+
+Local Push does not help away from home or with a failed LAN. Linkwatch does not
+bypass Do Not Disturb, force critical alerts or guarantee delivery. Normal push
+may route notification content through external push providers. Dashboard mute
+covers every output, and test requests are labeled as tests.
 
 ## Storage, exports and backups
 
@@ -225,9 +289,11 @@ dashboard dependency.
 
 `audio: true` connects to Supervisor's PulseAudio service so the app can play
 to the host output selected on the app page. No raw device or GPIO access is
-requested. `homeassistant_api: true` is required for Cast and phone requests. **This grants the app
+requested. `homeassistant_api: true` is required for Cast, phone requests and
+optional selected sensor reads/discovery. **This grants the app
 administrator access to Core through the proxy**, even though this app only
-uses the playback and configured Companion notification actions. Supervisor does
+uses playback, configured Companion notifications, selected state reads and
+opt-in sensor discovery. Supervisor does
 not offer a service-specific token scope.
 No additional Supervisor API role, host networking, hardware privileges, Docker
 socket or Home Assistant configuration mount is requested. The media directory
@@ -276,3 +342,23 @@ Refresh/reload the app store and look for **Local apps** (older versions:
 **Local add-ons**), then install and start **Linkwatch**.
 Do not install both the repository and local copies: they would maintain
 separate histories and could both send sounds.
+
+## Development
+
+Use Python 3.13. In a virtual environment, install
+`network_monitor/requirements.txt`, `pyyaml` and `ruff`, then run:
+
+```shell
+python -m unittest discover -s tests -q
+ruff check .
+node --check network_monitor/app/static/dashboard.js
+node --check network_monitor/app/static/telemetry.js
+```
+
+For loopback-only development, create a private `options.json` containing `{}`
+outside the repository and run `python -m network_monitor.app --development
+--options <options.json> --data <data-directory> --media <media-directory> --port
+8099`. Open `http://127.0.0.1:8099`. Defaults run real public TCP probes; optional
+connectors run only when privately configured. Never enable development mode in
+Home Assistant. CI checks service behavior and ARM64/amd64 image builds; these
+do not replace installation and alert listening tests on real hardware.

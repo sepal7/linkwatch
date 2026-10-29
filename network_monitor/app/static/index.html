@@ -15,6 +15,7 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
   <link rel="icon" type="image/svg+xml" href="mark.svg">
   <link rel="stylesheet" href="style.css">
   <script src="dashboard.js" defer></script>
+  <script src="telemetry.js" defer></script>
 </head>
 <body>
 <main>
@@ -27,6 +28,8 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
       <button data-view="overview" aria-pressed="true">Overview</button>
       <button data-view="trends" aria-pressed="false">Trends</button>
       <button data-view="incidents" aria-pressed="false">Incidents</button>
+      <button data-view="devices" aria-pressed="false">Devices</button>
+      <button data-view="sources" aria-pressed="false">Sources</button>
       <button data-view="settings" aria-pressed="false">Settings &amp; logs</button>
     </nav>
     <label class="range-label">Period <select id="range"><option value="300">5 minutes</option><option value="1800" selected>30 minutes</option><option value="3600">1 hour</option><option value="86400">24 hours</option><option value="604800">7 days</option></select></label>
@@ -62,6 +65,14 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
       <div class="chart-footer"><div class="legend"><span><i class="online"></i>Online</span><span><i class="degraded"></i>Degraded</span><span><i class="offline"></i>Unreachable</span><span><i class="unknown"></i>Unknown / gap</span></div><span id="chart-summary" class="subtle">Loading history…</span></div>
       <details id="timeline-inspector"><summary>Inspect timeline</summary><label class="sr-only" for="bucket-selector">Select a sampled time bucket</label><input id="bucket-selector" type="range" min="0" max="0" value="0" disabled><p id="bucket-detail" class="subtle">Select a point on the chart or move the slider to inspect a time bucket.</p></details>
     </section>
+    <section class="panel" id="traffic-panel" aria-labelledby="traffic-title" hidden>
+      <div class="section-heading"><h2 id="traffic-title">Internet traffic</h2><button class="text-button" data-go="sources">Data sources →</button></div>
+      <dl class="traffic-summary"><div><dt>Download</dt><dd id="traffic-down">—</dd></div><div><dt>Upload</dt><dd id="traffic-up">—</dd></div><div><dt>DNS queries / blocked</dt><dd id="dns-summary">—</dd></div></dl>
+      <p class="subtle" id="traffic-caption">Optional telemetry is not configured. Connection monitoring runs independently.</p>
+      <svg id="traffic-chart" viewBox="0 0 960 150" role="img" aria-label="Download and upload in the selected period"></svg>
+      <p class="subtle" id="traffic-history-label"></p>
+      <p class="subtle">Download: blue · Upload: green · Actual traffic, not available speed. Gaps mean no telemetry.</p>
+    </section>
     <details class="panel" id="probe-details"><summary>Connection details <span id="cadence" class="subtle"></span></summary>
       <p id="status-detail" class="subtle">Waiting for probe evidence.</p>
       <div class="table-scroll" tabindex="0" role="region" aria-label="Latest probe evidence"><table><thead><tr><th>Check</th><th>Result</th><th>Latency</th><th>Detail</th></tr></thead><tbody id="probes"></tbody></table></div>
@@ -72,6 +83,38 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
       <div id="recent-incidents" class="incident-list"><p class="subtle">Loading history…</p></div>
     </section>
   </section>
+  <section id="view-devices" aria-labelledby="devices-title" hidden>
+      <div class="page-heading"><h2 id="devices-title" tabindex="-1">Devices</h2><p class="subtle">Controller evidence, DNS decisions and traffic together. A device's own internet experience is not directly measured.</p></div>
+      <label class="device-search">Find a device <input id="device-search" type="search" placeholder="Name, IP or connection" autocomplete="off"></label>
+      <p id="devices-status" class="subtle" role="status">Loading optional inventory…</p>
+      <section class="panel" id="client-detail" aria-labelledby="client-title" hidden>
+        <div class="section-heading"><h3 id="client-title" tabindex="-1">Device details</h3><div class="actions"><button id="client-refresh">Refresh details</button><button id="client-close">Close</button></div></div>
+        <div id="client-body"></div>
+        <button id="client-dns">Load recent DNS activity</button><p id="client-dns-note" role="status" class="subtle">DNS is loaded only on request, not continuously copied.</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Recent DNS activity"><table><thead><tr><th>Time</th><th>Domain / type</th><th>DNS outcome</th><th>Reply</th></tr></thead><tbody id="client-queries"></tbody></table></div>
+      </section>
+      <div class="panel table-scroll" tabindex="0" role="region" aria-label="Network devices"><table><thead><tr><th>Device</th><th>Connection</th><th>Controller RX / TX</th><th>Evidence</th></tr></thead><tbody id="device-list"></tbody></table></div>
+      <p class="subtle">Client RX/TX is controller-reported traffic and may include LAN transfers. It is not necessarily internet-only download/upload. Missing metrics are not zero.</p>
+    </section>
+    <section id="view-sources" aria-labelledby="sources-title" hidden>
+      <div class="page-heading"><h2 id="sources-title" tabindex="-1">Data sources</h2><p class="subtle">Optional local integrations. A source outage never stops Linkwatch's connectivity checks.</p></div>
+      <p id="telemetry-error" class="notice" role="alert" hidden></p>
+      <div id="source-list"></div>
+      <section class="panel">
+        <div class="section-heading"><h3>Connect what you have</h3><button id="discover-sensors">Discover Home Assistant sensors</button></div>
+        <p class="subtle">No particular router, DNS server or internet provider is required. Start with connection monitoring, then add only the sources you want.</p>
+        <p id="discovery-status" class="subtle" role="status">Optional: enable ha_discovery_enabled in app Configuration to find existing traffic sensors. No network scanning.</p>
+        <div id="discovery-results"></div>
+        <details><summary>Available connectors</summary><p class="subtle">Any internet provider: map existing Home Assistant WAN rate sensors in internet_entities. UniFi: optional client inventory and legacy statistics. Pi-hole v6: optional DNS summary and query evidence. Starlink: optional Home Assistant dish sensors. Configure only the hardware you own; omitted connectors stay off.</p></details>
+      </section>
+      <section class="panel"><h3>Network equipment</h3><div id="infrastructure"><p class="subtle">Connect the official UniFi API to see available equipment statistics.</p></div></section>
+      <details class="panel"><summary>Connection setup</summary>
+        <p class="subtle">Enter endpoints and credentials only in the Home Assistant app's Configuration tab. Never paste secrets into GitHub. All integrations default to off.</p>
+        <p class="subtle">UniFi: local HTTPS URL and API key from Network → Integrations. For optional legacy counters, use a dedicated local read-only account. TLS verification stays on; a verified certificate SHA-256 fingerprint can pin a self-signed certificate.</p>
+        <p class="subtle">Pi-hole v6: local origin URL and an application password. Summary is polled slowly; device DNS queries load on demand. No filtering, maintenance, update or reboot commands are sent.</p>
+        <p class="subtle">Starlink: configure Home Assistant's official Starlink integration, then map its sensor entities in starlink_entities. Bypass setups may need a route configured by you. Linkwatch never reads location or sends restart/stow commands.</p>
+      </details>
+    </section>
   <section id="view-trends" aria-labelledby="trends-title" hidden>
     <div class="page-heading"><h2 id="trends-title" tabindex="-1">Connection trends</h2><p class="subtle">Measured from retained history. Unobserved time is never counted as online.</p></div>
     <dl id="trend-metrics" class="trend-metrics"></dl>
@@ -103,7 +146,7 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
         <p class="subtle">For phone notifications, enter your Companion app's <code>notify.mobile_app_…</code> action in <code>phone_notify_service</code>, then enable alerts. Set <code>sound_output: none</code> for phone-only alerts. Normal push can fail during a home internet outage; Companion Local Push can work on the same functioning LAN when configured on the phone. Dashboard mute covers all outputs.</p>
       </details>
     </section>
-    <section class="panel"><h3>Devices</h3><p>Monitoring from Home Assistant</p><p class="subtle">Client telemetry is not connected. The app cannot identify which individual devices experienced internet problems. A future optional read-only UniFi connection can add client connection evidence.</p></section>
+    <section class="panel"><h3>Device evidence</h3><p class="subtle">Optional UniFi and Pi-hole sources add observations in Devices. Client internet quality is not directly probed; a DNS block, weak signal or list disappearance does not establish an internet outage.</p><button class="text-button" data-go="devices">View devices →</button></section>
     <section class="panel"><h3>History &amp; sampling</h3><p id="retention" class="subtle">Loading retention…</p><p class="subtle">Monitoring gaps, unknown evidence and stale samples are not uptime. Each chart column aggregates observations; click the chart for details. Exports follow the selected period.</p></section>
     <details class="panel" id="event-details"><summary>Event log <span class="subtle">Latest 100 in selected period</span></summary><ol id="events" class="event-log"><li>No events loaded.</li></ol></details>
   </section>

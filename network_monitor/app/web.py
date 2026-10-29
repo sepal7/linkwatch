@@ -4,10 +4,12 @@ import math
 import time
 from pathlib import Path
 
+import aiohttp
 from aiohttp import web
 
 from .service import Monitor
 from .insights import incident, insights
+from .telemetry import SourceError, Telemetry
 
 STATIC = Path(__file__).parent / "static"
 
@@ -24,7 +26,8 @@ def window(request: web.Request, default_hours=24) -> tuple[float, float]:
         raise web.HTTPBadRequest(text="Use finite epoch seconds with 0 < range <= 90 days") from None
 
 
-def create_app(monitor: Monitor, *, development=False) -> web.Application:
+def create_app(monitor: Monitor, *, development=False,
+               telemetry: Telemetry | None = None) -> web.Application:
     @web.middleware
     async def ingress(request, handler):
         peer = request.transport.get_extra_info("peername") if request.transport else None
@@ -114,9 +117,51 @@ def create_app(monitor: Monitor, *, development=False) -> web.Application:
         return web.json_response({"message": "Test queued for configured outputs; check devices and the event log"},
                                  status=202)
 
+    async def sources(request):
+        if telemetry is None:
+            raise web.HTTPServiceUnavailable(text="Telemetry collector not started")
+        return web.json_response(telemetry.snapshot())
+
+    async def traffic(request):
+        if telemetry is None:
+            raise web.HTTPServiceUnavailable(text="Telemetry collector not started")
+        start, end = window(request)
+        return web.json_response(telemetry.history(start, end))
+
+    async def client(request):
+        if telemetry is None:
+            raise web.HTTPServiceUnavailable(text="Telemetry collector not started")
+        result = telemetry.client_detail(request.match_info["key"])
+        if result is None:
+            raise web.HTTPNotFound(text="Client is no longer retained")
+        return web.json_response(result)
+
+    async def dns(request):
+        if telemetry is None:
+            raise web.HTTPServiceUnavailable(text="Telemetry collector not started")
+        try:
+            result = await telemetry.dns(request.match_info["key"])
+        except SourceError as exc:
+            raise web.HTTPServiceUnavailable(text=str(exc)) from None
+        except (ValueError, TypeError, KeyError, TimeoutError):
+            raise web.HTTPServiceUnavailable(text="DNS query unavailable; inspect Pi-hole connectivity and API version") from None
+        except aiohttp.ClientError:
+            raise web.HTTPServiceUnavailable(text="Pi-hole connection unavailable") from None
+        return web.json_response(result)
+
+    async def discover(request):
+        if telemetry is None:
+            raise web.HTTPServiceUnavailable(text="Telemetry collector not started")
+        try:
+            return web.json_response(await telemetry.discover())
+        except SourceError as exc:
+            raise web.HTTPServiceUnavailable(text=str(exc)) from None
+        except (aiohttp.ClientError, TimeoutError, ValueError, TypeError):
+            raise web.HTTPServiceUnavailable(text="Sensor discovery failed; check the Home Assistant API") from None
+
     async def asset(request):
         name = request.match_info.get("name", "index.html")
-        if name not in ("index.html", "style.css", "dashboard.js", "mark.svg"):
+        if name not in ("index.html", "style.css", "dashboard.js", "telemetry.js", "mark.svg"):
             raise web.HTTPNotFound()
         return web.FileResponse(STATIC / name)
 
@@ -125,6 +170,11 @@ def create_app(monitor: Monitor, *, development=False) -> web.Application:
     app.router.add_get("/api/insights", trends)
     app.router.add_get("/api/incidents/{id}", incident_detail)
     app.router.add_get("/api/export.csv", export)
+    app.router.add_get("/api/telemetry", sources)
+    app.router.add_get("/api/traffic", traffic)
+    app.router.add_get("/api/clients/{key}", client)
+    app.router.add_get("/api/clients/{key}/dns", dns)
+    app.router.add_post("/api/discover", discover)
     app.router.add_post("/api/mute", mute)
     app.router.add_post("/api/test-sound", test_sound)
     app.router.add_post("/api/test-alerts", test_sound)

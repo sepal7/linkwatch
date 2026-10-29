@@ -77,6 +77,16 @@ details[open] > summary { margin-bottom: 16px; }
 #timeline-inspector { border-top: 1px solid var(--rule); padding-top: 14px; margin-top: 16px; }
 #timeline-inspector summary { color: var(--muted); font-size: 12px; }
 input[type="range"] { width: 100%; min-height: 28px; accent-color: var(--accent); }
+.traffic-summary { display: flex; flex-wrap: wrap; gap: 20px 60px; margin: 0 0 16px; }
+.traffic-summary dd { font-size: 24px; }
+#traffic-chart, .device-chart { width: 100%; height: auto; display: block; min-height: 100px; }
+.traffic-download { fill: none; stroke: var(--accent); stroke-width: 2; }
+.traffic-upload { fill: none; stroke: var(--online); stroke-width: 2; }
+.device-search { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+input[type="search"] { background: var(--surface); color: var(--text); border: 1px solid var(--rule); border-radius: 5px; padding: 10px 12px; min-height: 44px; font: inherit; max-width: 100%; }
+#device-list button { background: none; border: 0; color: var(--accent); text-align: left; padding: 0 8px 0 0; overflow-wrap: anywhere; }
+#device-list td { max-width: 260px; overflow-wrap: anywhere; }
+.source-values { white-space: pre-wrap; overflow-wrap: anywhere; }
 .table-scroll { overflow-x: auto; }
 table { width: 100%; min-width: 620px; border-collapse: collapse; text-align: left; font-size: 12px; }
 th { color: var(--muted); font-size: 11px; font-weight: 500; padding: 8px 18px 10px 0; white-space: nowrap; }
@@ -99,7 +109,8 @@ td:last-child { padding-right: 0; overflow-wrap: anywhere; }
 dt { color: var(--muted); font-size: 12px; }
 dd { font-size: 22px; margin: 8px 0 0; font-variant-numeric: tabular-nums; }
 .detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 16px 0 24px; }
-.detail-grid dd { font-size: 16px; }
+.detail-grid dd { font-size: 16px; overflow-wrap: anywhere; }
+.detail-grid > div { min-width: 0; }
 .exports, .actions { justify-content: flex-start; flex-wrap: wrap; font-size: 12px; }
 .exports a { min-height: 44px; display: inline-flex; align-items: center; }
 .event-log { list-style: none; padding: 0; margin: 12px 0; max-height: 340px; overflow-y: auto; font-size: 12px; }
@@ -116,7 +127,7 @@ code { overflow-wrap: anywhere; }
   header .subtle { width: 100%; font-size: 11px; }
   .brand-description { display: none; }
   .toolbar { flex-wrap: wrap; gap: 12px; padding: 16px 0; }
-  nav { width: 100%; gap: 0; }
+  nav { width: 100%; gap: 0; overflow-x: auto; }
   nav button { flex: 1; padding: 8px; font-size: 12px; white-space: nowrap; }
   .range-label { margin-left: auto; }
   .health-strip { grid-template-columns: 1fr 1fr; }
