@@ -190,7 +190,7 @@ type or outcome, case-insensitively. Matching/loaded counts and the query window
 remain visible. It does not fetch more records or search full Pi-hole history;
 at most 100 queries from the last 30 minutes/current binding are available.
 Loading a new snapshot replaces the search data; opening another device clears
-it. No allow/deny or device-block writes are introduced in this patch.
+it. Filtering does not perform an allow/deny or device-block action.
 
 Application snapshots are sensitive: at most 16 are cached in memory, reused
 for 30 seconds, and automatically evicted within 60 seconds even without
@@ -198,19 +198,80 @@ another read. They never enter SQLite, CSV, app event logs or backups. Browser
 snapshots remain visible until replaced/closed and are labeled with their fetch
 time; anyone with access to the authorized dashboard may see them.
 
-### Managing existing restrictions
+### Optional manual router controls
 
 The device view includes **Manage restrictions in UniFi**, opening only your
 configured HTTPS origin in a new tab. It does not submit a command, transfer
 Linkwatch credentials, select a device automatically or change a rule.
 
-This release remains read-only. Network 10.6.109's official client actions
-cover guest authorization, not parental pause/resume. Legacy `block-sta` uses a
-shared network-block flag without an ownership token: an app cannot safely
-distinguish its block from a later administrator restriction when unblocking.
-It is not a verified WAN-only pause and may affect LAN access too. Linkwatch
-therefore has **no write credentials, block/unblock backend, rule creation,
-automatic time limits or schedules**.
+Monitoring and application reads keep their existing **read-only account**.
+Separately enabled manual controls can change UniFi's **shared per-MAC block
+flag**. **Block network access** may interrupt LAN/Wi-Fi as well as internet;
+it is not a verified WAN-only pause. **Unblock router block** clears that flag
+**even if an administrator or another app set it**. It does not remove separate
+firewall, schedule or DNS rules. There is no automatic unblock, timer, firewall
+rewrite, configuration sync or ownership claim.
+
+Controls start off. To enable them privately in HA app Configuration:
+
+1. Create a **different dedicated local UniFi account** with the Network
+   permissions needed for manual client block/unblock on the intended site.
+   Store it in `unifi_control_username` / `unifi_control_password`; leave
+   `unifi_username`, `unifi_password` and the API key unchanged. Using the same
+   username as the read-only account is rejected. Two-factor/cloud-only login
+   challenges are not supported; do not broaden your normal account's rights.
+2. Set `unifi_control_client_macs` to the exact client MACs you intend to control
+   (maximum 32). Use device details to identify each interface, not a person's
+   name or an IP guess. Private/randomized MAC changes create a different target.
+   Never add gateways, switches/APs, controllers, DNS or Home Assistant hosts.
+3. Set `unifi_control_ha_ip` to your Home Assistant host's **LAN IPv4 address**,
+   not the add-on/Supervisor container address. Use a reservation/static address
+   and update this value if it changes: the add-on cannot infer the HA host's
+   LAN address reliably through Supervisor/NAT. Verify `unifi_legacy_site` and
+   the configured controller origin identify the same site as device inventory.
+4. Set `unifi_controls_enabled: true`, Save and Restart. Open a device's
+   **Network restrictions**, choose **Block network access…** or **Unblock
+   router block…**, review exact MAC/IP, current flag and impact, then explicitly
+   confirm within 60 seconds. Nothing runs on merely selecting a device.
+
+When blocked clients disappear from connected inventory or after Linkwatch
+restarts, use **Configured router-control targets** to reopen an explicitly
+configured MAC. Unblock still requires a fresh exact router user record with
+stable ID, reported IPv4 and explicit `blocked: true`; unknown/missing fields
+stop the action. Blocking additionally requires fresh connected inventory.
+Unsupported offline records must be managed in UniFi instead.
+
+The adapter follows the maintained Art-of-WiFi legacy client: fixed reads of
+`/proxy/network/api/s/{site}/stat/user/{mac}`, `/stat/device` and
+`/rest/networkconf`, then only `POST /cmd/stamgr` with `block-sta` or
+`unblock-sta` and the confirmed MAC. A new isolated TLS-verified control session
+is used for each preview/submit; the read-only cookie jar is never reused or
+upgraded. UniFi OS's TLS-delivered `TOKEN` cookie supplies the command CSRF
+token. Normal certificate verification or the configured trusted fingerprint
+applies to every request; no insecure fallback or automatic command retry.
+
+Fresh infrastructure/network reads exclude managed equipment and gateways.
+The HA IP, configured probe router/DNS and resolved controller/DNS origins are
+also protected. Controls currently require IPv4 client records and usable
+gateway data; unsupported schemas, missing permissions or unresolved protected
+hosts stop before submission. This cannot compensate for an incorrect/stale HA
+IP setting or an incorrectly identified physical client.
+
+Each confirmation is single-use, in-memory and bound to the exact MAC, stable
+router record ID, IP, current flag and observed binding. Submit rechecks those
+values and safeguards. UniFi has no compare-and-set/ownership API for this flag:
+another administrator can still race the final command; coordinate manual
+changes rather than treating this as policy enforcement. A successful response
+requires reading back the exact requested flag; **verified flag is not a test of
+effective internet/LAN access**. Accepted command with failed readback is
+explicitly distinct from a verified result. On any uncertain submission, inspect
+UniFi before another attempt. There is no rollback or automatic unblock.
+
+HTTP calls have six-second limits; preview has a 20-second overall budget and
+submit/readback 30 seconds. The ingress, same-origin token and dashboard-access
+trust model below apply to these controls too. Audits retain operation/action/
+outcome only, not client names, MACs, IPs, credentials or session tokens.
+Disabling/uninstalling Linkwatch does not remove router blocks.
 
 DNS decisions are observed outcomes, not a complete list of effective router
 and DNS rules. Firewall policies, inheritance, schedule evaluation and
@@ -218,6 +279,74 @@ application-specific restrictions are not synchronized or evaluated here.
 Manage existing UniFi and Pi-hole restrictions in their own interfaces;
 Linkwatch never claims that a displayed application bypassed a rule or that
 absence of traffic proves enforcement.
+
+### Optional exact-domain DNS actions for existing kids groups
+
+This feature is **off by default** and independent of read-only DNS/activity.
+It creates a single **exact** allow/deny entry through Pi-hole v6's API after
+you preview and confirm its group-wide effect. It is not a per-device firewall
+or a whole-application block.
+
+1. In Pi-hole, privately identify the IDs of your **existing, enabled kids-only
+   groups**. Do not select Default (ID 0). Linkwatch cannot know which group
+   contains only children; review the group's members yourself.
+2. In HA app Configuration set `pihole_action_group_ids` to those nonzero IDs
+   (maximum eight), then set `pihole_actions_enabled: true`, Save and Restart.
+   Empty, duplicate or Default IDs are rejected; there is no fallback.
+3. This release requires an **existing explicit Pi-hole client entry for the
+   device's current exact IP**, with membership in **every configured group**.
+   Pi-hole gives exact IP entries precedence over subnet/MAC/hostname matches.
+   MAC-only, subnet-only, ambiguous or stale bindings stop the action rather
+   than guess the effective group. Review client setup yourself in Pi-hole;
+   Linkwatch never creates clients or changes memberships.
+4. Open the device, load DNS, then choose a row's **Allow…** or
+   **Deny…**. Review the exact normalized domain, current group
+   names/IDs and **all-group-member impact**, including siblings. Confirm within
+   60 seconds. Changing/closing the device cancels the visible confirmation.
+
+Existing API password/session and TLS verification/pinning are reused. The
+Pi-hole application password supports domain-list management without enabling
+broad `webserver.api.app_sudo` configuration permission; do not enable that
+permission for this feature. HTTPS or a separately verified certificate pin
+is recommended. An authenticated dashboard user can confirm these actions;
+this feature does not introduce a separate HA administrator-role check. Grant
+access to this app only to users trusted to manage the selected groups.
+
+The only remote mutation is a fixed `POST /api/domains/allow/exact` or
+`POST /api/domains/deny/exact`, with explicit non-Default group IDs, enabled
+state and an operation marker. Preview and confirmation both reread group
+existence/enabled state, exact-IP client membership, current binding and
+existing exact-domain entries. A group rename, membership change, stale client,
+expired/reused confirmation or **any existing exact allow/deny entry** stops the
+operation. This includes disabled entries and entries in other groups:
+Linkwatch will not modify their comments, move, enable, overwrite, reassign or
+delete them. Manage existing/conflicting entries directly in Pi-hole.
+
+An allow rule may bypass existing DNS filters for **everyone in those groups**.
+Pi-hole allow rules have priority; a deny entry can be overridden by an
+applicable allow/regex rule. Exact rules do not cover subdomains. Caches and
+existing connections may delay effects; alternate/encrypted DNS can bypass
+Pi-hole. UniFi rules still apply. The result verifies **rule creation and its
+stored groups**, not effective access or blocking. No packet interception,
+DNS server configuration, list reload command or router action is sent.
+
+Each operation is serialized and bounded to 20 seconds (existing six-second
+HTTP request limit), checks Pi-hole's semantic processing errors, then reads
+back type, domain, enabled state, groups and the operation marker. A timeout,
+connection error, concurrent external edit or ambiguous response after
+submission is **unverified**, never success. Inspect Pi-hole before retrying;
+there is no automatic write retry, rollback, undo, removal or bulk operation.
+An external administrator can still race the final check; Pi-hole has no
+transactional conditional-create API, so conflicting readback is reported
+without deleting anyone's rule.
+
+Confirmation payloads stay in memory for up to 60 seconds (maximum 16), are
+single-use and disappear on restart. The bounded existing app event log records
+time, allow/deny, random operation ID, group count and verified/unverified
+outcome, **not domain, device identity, group names, password or session/token**.
+It is a local audit aid, not a tamper-proof user-attribution log. Rules remain
+in Pi-hole until you change/remove them there; app disable/uninstall does not
+silently undo a rule.
 
 ### TLS certificates
 
@@ -232,8 +361,10 @@ Linkwatch does not disable certificate checking globally.
 
 Set `pihole_url` to the local HTTP/HTTPS origin (no `/admin` or `/api` path) and
 `pihole_password` to an application password generated in Pi-hole's settings.
-Keep application-password write access disabled where supported. Linkwatch does
-not assume Pi-hole's permission settings provide a granular read-only token.
+Leave broad `webserver.api.app_sudo` configuration permission disabled; it is
+not needed for the optional domain-list actions above. Linkwatch does not assume
+Pi-hole's application password is a granular read-only token: monitoring uses
+reads and domain-list mutations require the separate default-off feature gate.
 HTTPS uses normal certificate verification by default. For a self-signed local
 certificate, set `pihole_tls_fingerprint` to its **64 hexadecimal SHA-256
 certificate fingerprint**, verified through a trusted channel such as an

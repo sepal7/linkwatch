@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.4.0
+
+- Optional confirmed exact-domain allow/deny actions from loaded DNS rows,
+  scoped to explicitly configured existing enabled non-Default kids groups.
+  Off by default; no group/client creation, membership changes or fallback.
+- Group-wide impact preview, exact client-IP membership proof, fresh conflict
+  rechecks and single-use expiring confirmations. Existing exact rules are
+  never overwritten, moved or deleted.
+- Fixed endpoint whitelist, ingress/custom-token CSRF protection, semantic
+  response checks and readback verification. Uncertain outcomes are explicit
+  and never automatically retried; redacted operation metadata in the event log.
+- Optional manual UniFi **Block network access / Unblock router block**, with a
+  separate control account, explicit client MAC allowlist and protected HA IP.
+  Fresh router state/infrastructure checks and one-shot confirmations; unblock
+  can clear a shared flag set outside Linkwatch. LAN access may also be affected.
+- Recovery picker for configured blocked devices absent from online inventory,
+  including after restart. No automatic unblock, timers, firewall edits or
+  changes to separate schedules/DNS rules. Command acceptance, verified flag
+  and unverified outcome remain distinct; effective access is not tested.
+
 ## 1.3.1
 
 - Fix incorrect service names: router traffic application numbers are local to

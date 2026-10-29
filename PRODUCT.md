@@ -58,9 +58,21 @@ dashboard. Opt-in router application snapshots and DNS decisions remain separate
 evidence streams with explicit periods. Traffic does not prove active gaming,
 screen time or viewed content. Application snapshots are briefly memory-only;
 no full destination capture, HTTPS interception or browsing profile is added.
-The user chose to manage blocking in UniFi for now: no write credentials or
-router control backend, only a configured-origin link for existing restrictions.
+The user explicitly approved optional confirmed manual router block/unblock
+after being told that the shared flag can include administrator blocks and
+blocking may affect LAN access too. This is not app-owned pause/resume.
 The device view prioritizes exact controller-named services ranked by bytes,
 with named/protocol/unidentified coverage visible. Raw IDs, unverified category
 text and overlapping time estimates belong in expandable technical evidence.
 Names must match the category/application composite, not a local app ID alone.
+Separately enabled DNS actions can create exact allow/deny rules only for
+explicitly configured existing enabled non-Default kids groups, after a fresh
+group-wide impact preview and confirmation. Existing rules and memberships
+are never edited. Selected-client applicability requires an explicit exact-IP
+Pi-hole client entry; unknown mappings stop writes. Rule readback verification
+is distinct from effective enforcement. UniFi monitoring credentials remain
+read-only; a separate opt-in control account can change only the shared
+per-MAC block flag, with fresh state/safeguards and one-shot confirmation.
+An explicit client-MAC allowlist and configured HA host IPv4 protect against
+household lockout. Infrastructure is excluded and unverified outcomes never
+trigger retries. No automatic unblock, rule edits, schedules or time limits.

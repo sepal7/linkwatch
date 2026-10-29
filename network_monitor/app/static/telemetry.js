@@ -2,6 +2,8 @@
 let telemetryData = null, selectedClient = null, clientRequest = 0;
 let activityRequest = 0;
 let loadedDNS = null;
+let controlOptions = null, dnsPlan = null, dnsActionRequest = 0, dnsActionBusy = false;
+let routerPlan = null, routerActionRequest = 0, routerActionBusy = false;
 const bytes = value => {
   if (!Number.isFinite(value)) return "Unavailable";
   const units = ["B", "kB", "MB", "GB", "TB"];
@@ -113,6 +115,9 @@ async function openClient(key) {
   selectedClient = key;
   const request = ++clientRequest;
   activityRequest++;
+  cancelDNSAction();
+  cancelRouterAction();
+  renderRouterControls();
   $("client-detail").hidden = false; $("client-title").textContent = "Loading device…";
   $("client-evidence-status").textContent = "Loading controller evidence…";
   $("client-activity-results").hidden = true;
@@ -147,7 +152,7 @@ async function openClient(key) {
     svg.setAttribute("viewBox", "0 0 960 150"); svg.setAttribute("class", "device-chart");
     svg.setAttribute("role", "img"); svg.setAttribute("aria-label", "Client RX blue and TX green in the last 30 minutes");
     const now = Date.now() / 1000;
-    trafficGraph(svg, data.samples, "rx_bps", "tx_bps", now - 1800, now, telemetryData.interval_seconds * 3);
+    trafficGraph(svg, data.samples, "rx_bps", "tx_bps", now - 1800, now, (telemetryData?.interval_seconds || 15) * 3);
     body.append(text("h3", "Client traffic · last 30 minutes"), svg, text("p", "Blue: controller RX · Green: controller TX · Includes possible LAN traffic; gaps are unobserved.", "subtle"));
     body.append(text("p", data.scope, "subtle"), text("h3", "Observed connection changes"));
     for (const event of data.events) body.append(text("p", `${formatTime(event.ts)} · ${event.event}`, "subtle"));
@@ -159,9 +164,9 @@ async function openClient(key) {
       body.append(button, document.createElement("br"));
     }
     if (!data.network_context.length) body.append(text("p", "No retained shared incidents overlap this binding window.", "subtle"));
-    $("client-dns").disabled = client.stale || !telemetryData.sources.pihole.enabled;
+    $("client-dns").disabled = client.stale || !telemetryData?.sources.pihole.enabled;
     $("client-activity").disabled = !activityAvailable();
-    if (telemetryData.activity_enabled && !telemetryData.sources.legacy.enabled) {
+    if (telemetryData?.activity_enabled && !telemetryData.sources.legacy.enabled) {
       $("client-activity-note").textContent = "Configure the dedicated local read-only UniFi username and password under Sources to load application evidence.";
     }
     $("client-title").focus({preventScroll: true});
@@ -270,6 +275,71 @@ async function loadClientDNS() {
     }
   } finally { if (request === clientRequest) $("client-dns").disabled = false; }
 }
+function cancelRouterAction() {
+  routerActionRequest++;
+  routerPlan = null;
+  $("router-action-confirmation").hidden = true;
+  $("router-action-status").textContent = "";
+}
+function renderRouterControls() {
+  const enabled = controlOptions?.router_enabled;
+  const target = controlOptions?.router_targets?.find(target => target.key === selectedClient);
+  $("router-action-buttons").hidden = !enabled || !target;
+  $("router-block").disabled = routerActionBusy;
+  $("router-unblock").disabled = routerActionBusy;
+  $("router-actions-setup").textContent = !enabled ?
+    "Manual router controls are off. Configure a separate control account, allowed client MACs and the Home Assistant host IP before enabling unifi_controls_enabled." :
+    !target ? "This MAC is not explicitly configured for controls. Add only intended client MACs in app Configuration; infrastructure is protected." :
+      `Controls target exact MAC ${target.mac}. Preview reads the current router flag and safeguards before you confirm. Blocking requires fresh connected inventory; unblock also supports configured targets absent from that inventory.`;
+}
+async function previewRouterAction(action) {
+  if (routerActionBusy || !controlOptions?.router_enabled) return;
+  cancelRouterAction();
+  const request = ++routerActionRequest, client = clientRequest, key = selectedClient;
+  routerActionBusy = true; renderRouterControls();
+  $("router-action-status").textContent = "Reading current router block state, exact MAC/IP and protected infrastructure…";
+  try {
+    const data = await api(`api/clients/${encodeURIComponent(key)}/router-actions/prepare`,
+      {action}, 25000, {"X-Linkwatch-Control": controlOptions.csrf});
+    if (request !== routerActionRequest || client !== clientRequest) return;
+    routerPlan = {...data, key, expires: Date.now() + data.expires_in * 1000};
+    const label = action === "block" ? "Block network access" : "Unblock router block";
+    $("router-action-scope").textContent = `${label}: ${data.name} · MAC ${data.mac} · IP ${data.ip}. Router currently reports ${data.blocked ? "BLOCKED" : "UNBLOCKED"}.${data.private_mac ? " This is a private/locally administered MAC; verify the intended device." : ""}`;
+    $("router-action-impact").textContent = `${data.impact} Confirmation expires in ${data.expires_in} seconds.`;
+    $("router-action-apply").textContent = `Confirm: ${label}`;
+    $("router-action-apply").disabled = false;
+    $("router-action-confirmation").hidden = false;
+    $("router-action-status").textContent = "Nothing changed yet. Review the exact device and shared-flag/LAN impact.";
+    $("router-action-title").focus();
+  } catch (error) {
+    if (client === clientRequest && request === routerActionRequest) $("router-action-status").textContent = `Router preview stopped: ${error.message}`;
+  } finally {
+    routerActionBusy = false; renderRouterControls();
+  }
+}
+async function applyRouterAction() {
+  const plan = routerPlan, client = clientRequest, request = routerActionRequest;
+  if (routerActionBusy || !plan || plan.key !== selectedClient) return;
+  if (Date.now() >= plan.expires) {
+    cancelRouterAction(); $("router-action-status").textContent = "Confirmation expired. Preview router state again.";
+    return;
+  }
+  routerPlan = null; routerActionBusy = true; renderRouterControls();
+  $("router-action-apply").disabled = true; $("router-action-cancel").disabled = true;
+  $("router-action-status").textContent = "Rechecking state, submitting this one command, then reading back the shared flag…";
+  try {
+    const result = await api(`api/clients/${encodeURIComponent(plan.key)}/router-actions/apply`,
+      {token: plan.token}, 35000, {"X-Linkwatch-Control": controlOptions.csrf});
+    if (client === clientRequest && request === routerActionRequest) $("router-action-status").textContent = result.message;
+  } catch (error) {
+    if (client === clientRequest && request === routerActionRequest) $("router-action-status").textContent =
+      `Router action not verified: ${error.message}. Inspect UniFi before retrying.`;
+  } finally {
+    routerActionBusy = false;
+    $("router-action-confirmation").hidden = true; $("router-action-cancel").disabled = false;
+    renderRouterControls();
+  }
+}
 function renderClientDNS() {
   if (!loadedDNS) return;
   const search = $("client-dns-search").value.trim().toLowerCase();
@@ -280,11 +350,97 @@ function renderClientDNS() {
     const row = document.createElement("tr");
     row.append(text("td", formatTime(q.ts)), text("td", `${q.domain || "Hidden"} · ${q.type || "—"}`),
       text("td", q.status || "Unknown"), text("td", `${q.reply || "Unknown"} · ${ms(q.reply_ms)}`)); body.append(row);
+    if (controlOptions?.dns_enabled && q.domain) {
+      const actions = document.createElement("div"); actions.className = "actions";
+      for (const action of ["allow", "deny"]) {
+        const label = action === "allow" ? "Allow" : "Deny";
+        const button = text("button", `${label}…`);
+        button.setAttribute("aria-label", `${label} ${q.domain} in configured kids groups`);
+        button.disabled = dnsActionBusy;
+        button.addEventListener("click", () => previewDNSAction(q.domain, action));
+        actions.append(button);
+      }
+      row.children[1].append(actions);
+    }
   }
   $("client-dns-count").textContent = `${queries.length} matching / ${loadedDNS.queries.length} loaded (maximum ${loadedDNS.limit ?? 100}) · ${formatTime(loadedDNS.from)} – ${formatTime(loadedDNS.fetched)}. Search covers only this loaded snapshot, not full DNS history.`;
   if (!body.children.length) emptyRow(body, loadedDNS.queries.length ?
     "No loaded queries match this search. Clear the search or load a newer snapshot." :
     "No visible DNS requests in this binding window. This does not mean no activity.");
+}
+function cancelDNSAction() {
+  dnsActionRequest++;
+  dnsPlan = null;
+  $("dns-action-confirmation").hidden = true;
+  $("dns-action-status").textContent = "";
+}
+async function loadControlOptions() {
+  try {
+    controlOptions = await api("api/controls");
+    $("dns-actions-setup").textContent = controlOptions.dns_enabled ?
+      "DNS actions create exact-domain rules for your configured kids groups, not this device alone. Use a row's Allow/Deny button to check membership, conflicts and impact before confirming." :
+      "DNS actions are off. Configure pihole_action_group_ids using existing non-Default kids groups, then enable pihole_actions_enabled in app Configuration. No memberships or Default-group rules are changed.";
+    renderClientDNS();
+    $("router-recovery").hidden = !controlOptions.router_enabled;
+    const targets = $("router-target"); targets.replaceChildren();
+    for (const target of controlOptions.router_targets || []) {
+      const option = text("option", target.mac); option.value = target.key; targets.append(option);
+    }
+    if (controlOptions.router_targets?.length) targets.value = controlOptions.router_targets[0].key;
+    renderRouterControls();
+  } catch (error) {
+    controlOptions = null;
+    $("dns-actions-setup").textContent = `DNS action settings unavailable: ${error.message}. Read-only DNS still works.`;
+  }
+}
+async function previewDNSAction(domain, action) {
+  if (dnsActionBusy || !controlOptions?.dns_enabled) return;
+  cancelDNSAction();
+  const request = ++dnsActionRequest, client = clientRequest, key = selectedClient;
+  dnsActionBusy = true; renderClientDNS();
+  $("dns-action-status").textContent = "Checking existing kids groups, exact client-IP membership and domain conflicts…";
+  try {
+    const data = await api(`api/clients/${encodeURIComponent(key)}/dns-actions/prepare`,
+      {domain, action}, 25000, {"X-Linkwatch-Control": controlOptions.csrf});
+    if (request !== dnsActionRequest || client !== clientRequest) return;
+    dnsPlan = {...data, key, expires: Date.now() + data.expires_in * 1000};
+    $("dns-action-scope").textContent = `${data.action.toUpperCase()} exact domain ${data.domain} for ALL clients in: ${data.groups.map(group => `${group.name} (ID ${group.id})`).join(", ")}. This includes other devices in those groups.`;
+    $("dns-action-impact").textContent = `${data.impact} Confirmation expires in ${data.expires_in} seconds.`;
+    $("dns-action-confirmation").hidden = false;
+    $("dns-action-apply").textContent = `Confirm ${data.action.toUpperCase()} for these groups`;
+    $("dns-action-apply").disabled = false;
+    $("dns-action-status").textContent = "Review the exact domain and group-wide impact before confirming. Nothing changed yet.";
+    $("dns-action-title").focus();
+  } catch (error) {
+    if (client === clientRequest && request === dnsActionRequest) $("dns-action-status").textContent = `DNS rule preview stopped: ${error.message}`;
+  } finally {
+    dnsActionBusy = false;
+    renderClientDNS();
+  }
+}
+async function applyDNSAction() {
+  const plan = dnsPlan, client = clientRequest, request = dnsActionRequest;
+  if (dnsActionBusy || !plan || plan.key !== selectedClient) return;
+  if (Date.now() >= plan.expires) {
+    cancelDNSAction(); $("dns-action-status").textContent = "Confirmation expired. Preview the domain again.";
+    return;
+  }
+  dnsPlan = null;
+  dnsActionBusy = true; renderClientDNS();
+  $("dns-action-apply").disabled = true; $("dns-action-cancel").disabled = true;
+  $("dns-action-status").textContent = "Submitting the confirmed exact-domain group rule once, then checking readback…";
+  try {
+    const result = await api(`api/clients/${encodeURIComponent(plan.key)}/dns-actions/apply`,
+      {token: plan.token}, 25000, {"X-Linkwatch-Control": controlOptions.csrf});
+    if (client === clientRequest && request === dnsActionRequest) $("dns-action-status").textContent = result.message;
+  } catch (error) {
+    if (client === clientRequest && request === dnsActionRequest) $("dns-action-status").textContent =
+      `DNS action not verified: ${error.message}. Inspect Pi-hole before retrying.`;
+  } finally {
+    dnsActionBusy = false;
+    $("dns-action-confirmation").hidden = true; $("dns-action-cancel").disabled = false;
+    renderClientDNS();
+  }
 }
 async function pollTelemetry() {
   try {
@@ -310,9 +466,21 @@ async function pollTelemetry() {
 }
 $("device-search").addEventListener("input", renderDevices);
 $("client-refresh").addEventListener("click", () => { if (selectedClient) openClient(selectedClient); });
-$("client-close").addEventListener("click", () => { clientRequest++; selectedClient = null; loadedDNS = null; $("client-detail").hidden = true; $("devices-title").focus(); });
+$("client-close").addEventListener("click", () => { cancelDNSAction(); cancelRouterAction(); clientRequest++; selectedClient = null; loadedDNS = null; $("client-detail").hidden = true; $("devices-title").focus(); });
 $("client-dns").addEventListener("click", loadClientDNS);
 $("client-dns-search").addEventListener("input", renderClientDNS);
+$("dns-action-cancel").addEventListener("click", cancelDNSAction);
+$("dns-action-apply").addEventListener("click", applyDNSAction);
+$("router-target-open").addEventListener("click", async () => {
+  if ($("router-target").value) {
+    await openClient($("router-target").value);
+    $("restrictions-title").focus();
+  }
+});
+$("router-block").addEventListener("click", () => previewRouterAction("block"));
+$("router-unblock").addEventListener("click", () => previewRouterAction("unblock"));
+$("router-action-cancel").addEventListener("click", cancelRouterAction);
+$("router-action-apply").addEventListener("click", applyRouterAction);
 $("client-activity").addEventListener("click", loadClientActivity);
 $("activity-window").addEventListener("change", () => {
   activityRequest++;
@@ -333,3 +501,4 @@ $("discover-sensors").addEventListener("click", async () => {
   finally { $("discover-sensors").disabled = !telemetryData?.discovery_enabled; }
 });
 pollTelemetry();
+loadControlOptions();

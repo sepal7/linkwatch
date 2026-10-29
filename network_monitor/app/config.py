@@ -40,6 +40,13 @@ class Config:
     internet_entities: list[str] = field(default_factory=list)
     ha_discovery_enabled: bool = False
     unifi_activity_enabled: bool = False
+    pihole_actions_enabled: bool = False
+    pihole_action_group_ids: list[int] = field(default_factory=list)
+    unifi_controls_enabled: bool = False
+    unifi_control_username: str = field(default="", repr=False)
+    unifi_control_password: str = field(default="", repr=False)
+    unifi_control_ha_ip: str = field(default="", repr=False)
+    unifi_control_client_macs: list[str] = field(default_factory=list, repr=False)
 
     def __post_init__(self):
         bounds = {
@@ -53,7 +60,8 @@ class Config:
             value = getattr(self, name)
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(f"{name} must be an integer in {low}..{high}")
-        for name in ("alerts_enabled", "ha_discovery_enabled", "unifi_activity_enabled"):
+        for name in ("alerts_enabled", "ha_discovery_enabled", "unifi_activity_enabled",
+                     "pihole_actions_enabled", "unifi_controls_enabled"):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be boolean")
         for name in ("router_host", "dns_server", "dns_test_name",
@@ -100,7 +108,8 @@ class Config:
                 if prefix == "unifi" and parts.scheme != "https":
                     raise ValueError("UniFi requires HTTPS")
         for name in ("unifi_api_key", "unifi_username", "unifi_password",
-                     "pihole_password", "unifi_tls_fingerprint", "pihole_tls_fingerprint"):
+                     "pihole_password", "unifi_tls_fingerprint", "pihole_tls_fingerprint",
+                     "unifi_control_username", "unifi_control_password", "unifi_control_ha_ip"):
             if not isinstance(getattr(self, name), str):
                 raise ValueError(f"{name} must be text")
         for name in ("unifi_site_id", "unifi_legacy_site"):
@@ -115,6 +124,31 @@ class Config:
                 raise ValueError(f"{prefix}_tls_fingerprint requires an HTTPS URL")
         if bool(self.unifi_username) != bool(self.unifi_password):
             raise ValueError("Configure both UniFi read-only username and password")
+        macs = self.unifi_control_client_macs
+        if (not isinstance(macs, list) or len(macs) > 32 or
+                any(not isinstance(mac, str) or not re.fullmatch(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", mac)
+                    or int(mac[:2], 16) & 1 or mac.lower() == "00:00:00:00:00:00" for mac in macs) or
+                len(macs) != len({mac.lower() for mac in macs})):
+            raise ValueError("unifi_control_client_macs must contain up to 32 unique unicast client MAC addresses")
+        if self.unifi_control_ha_ip:
+            ip = ipaddress.ip_address(self.unifi_control_ha_ip)
+            if ip.version != 4 or ip.is_unspecified or ip.is_multicast or ip.is_loopback:
+                raise ValueError("unifi_control_ha_ip must identify the Home Assistant host's LAN IPv4 address")
+        if bool(self.unifi_control_username) != bool(self.unifi_control_password):
+            raise ValueError("Configure both UniFi control username and password")
+        if self.unifi_control_username and self.unifi_control_username.casefold() == self.unifi_username.casefold():
+            raise ValueError("Use a separate UniFi control account; leave the read-only account unchanged")
+        if self.unifi_controls_enabled and (
+                not self.unifi_url or not self.unifi_control_username or not self.unifi_legacy_site or
+                not self.unifi_control_ha_ip or not macs):
+            raise ValueError("UniFi controls require separate credentials, a site, explicit client MACs and HA host LAN IP")
+        groups = self.pihole_action_group_ids
+        if (not isinstance(groups, list) or len(groups) > 8 or
+                any(type(group) is not int or not 1 <= group <= 2147483647 for group in groups) or
+                len(groups) != len(set(groups))):
+            raise ValueError("pihole_action_group_ids must contain up to eight unique non-Default group IDs")
+        if self.pihole_actions_enabled and (not self.pihole_url or not self.pihole_password or not groups):
+            raise ValueError("Pi-hole actions require a configured API password and explicit non-Default group IDs")
         for name in ("starlink_entities", "internet_entities"):
             mappings = getattr(self, name)
             if not isinstance(mappings, list) or len(mappings) > 10:

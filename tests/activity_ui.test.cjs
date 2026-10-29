@@ -13,6 +13,12 @@ class Element {
     this.value = "";
   }
   append(...children) { this.children.push(...children); }
+  focus() {}
+  setAttribute(name, value) { this[name] = value; }
+  addEventListener(name, callback) {
+    this.listeners ??= {};
+    this.listeners[name] = callback;
+  }
   replaceChildren(...children) { this.children = [...children]; }
   set textContent(value) { this.content = String(value); this.children = []; }
   get textContent() { return this.content + this.children.map(child => child.textContent).join(" "); }
@@ -36,7 +42,7 @@ function dashboard() {
   });
   const source = readFileSync(path.join(__dirname, "..", "network_monitor", "app", "static", "telemetry.js"), "utf8");
   vm.runInContext(source.slice(0, source.indexOf('$("device-search").addEventListener')), context);
-  return {element, run: source => vm.runInContext(source, context),
+  return {element, context, run: source => vm.runInContext(source, context),
     set: (name, value) => vm.runInContext(`${name} = ${JSON.stringify(value)}`, context)};
 }
 
@@ -109,4 +115,107 @@ test("DNS search is case-insensitive across loaded domains, types and outcomes w
   d.set("loadedDNS", {from: 10, fetched: 20, queries: []});
   d.run("renderClientDNS()");
   assert.match(d.element("client-queries").textContent, /does not mean no activity/);
+});
+
+test("DNS actions require a visible group-impact preview and only send the confirmed token once", async () => {
+  const d = dashboard(), calls = [];
+  d.context.api = async (...args) => {
+    calls.push(args);
+    if (args[0].endsWith("/prepare")) {
+      return {token: "synthetic-confirmation", domain: "example.com", action: "deny", expires_in: 60,
+        groups: [{id: 7, name: "Example kids"}], impact: "ALL clients, not only this device."};
+    }
+    return {message: "Creation verified, not effective blocking."};
+  };
+  d.set("selectedClient", "synthetic-client");
+  d.set("controlOptions", {dns_enabled: true, csrf: "synthetic-csrf"});
+  d.set("loadedDNS", {from: 1, fetched: 2, queries: [{domain: "example.com", type: "A", status: "FORWARDED"}]});
+  await d.run("previewDNSAction('example.com', 'deny')");
+  assert.equal(calls.length, 1);
+  assert.equal(d.element("dns-action-confirmation").hidden, false);
+  assert.match(d.element("dns-action-scope").textContent, /DENY exact domain example.com for ALL clients in: Example kids \(ID 7\)/);
+  assert.match(d.element("dns-action-impact").textContent, /not only this device/);
+  await d.run("applyDNSAction()");
+  await d.run("applyDNSAction()");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1][0], "api/clients/synthetic-client/dns-actions/apply");
+  assert.equal(JSON.stringify(calls[1][1]), '{"token":"synthetic-confirmation"}');
+  assert.equal(calls[1][3]["X-Linkwatch-Control"], "synthetic-csrf");
+  assert.equal(d.element("dns-action-confirmation").hidden, true);
+  assert.match(d.element("dns-action-status").textContent, /not effective blocking/);
+});
+
+test("cancelled or expired DNS confirmations cannot submit; unknown writes are shown without retry", async () => {
+  const d = dashboard(), calls = [];
+  d.context.api = async (...args) => { calls.push(args); throw Error("Outcome unverified"); };
+  d.set("selectedClient", "synthetic-client");
+  d.set("controlOptions", {dns_enabled: true, csrf: "synthetic-csrf"});
+  const plan = {key: "synthetic-client", token: "synthetic-confirmation", expires: Date.now() + 60000};
+  d.set("dnsPlan", plan);
+  d.run("cancelDNSAction()");
+  await d.run("applyDNSAction()");
+  assert.equal(calls.length, 0);
+  d.set("dnsPlan", {...plan, expires: 0});
+  await d.run("applyDNSAction()");
+  assert.equal(calls.length, 0);
+  assert.match(d.element("dns-action-status").textContent, /expired/);
+  d.set("dnsPlan", plan);
+  await d.run("applyDNSAction()");
+  assert.equal(calls.length, 1);
+  assert.match(d.element("dns-action-status").textContent, /not verified.*Inspect Pi-hole/);
+  await d.run("applyDNSAction()");
+  assert.equal(calls.length, 1);
+});
+
+test("manual router controls preview the exact shared flag and only submit one confirmed token", async () => {
+  const d = dashboard(), calls = [];
+  d.context.api = async (...args) => {
+    calls.push(args);
+    if (args[0].endsWith("/prepare")) return {
+      token: "router-confirmation", action: "unblock", name: "Example client",
+      mac: "02:00:00:00:00:01", ip: "192.0.2.10", blocked: true, private_mac: true, expires_in: 60,
+      impact: "Unblock clears the shared flag EVEN if set outside Linkwatch; LAN may be affected."
+    };
+    return {message: "Shared flag verified as UNBLOCKED; effective access not tested."};
+  };
+  d.set("selectedClient", "example-key");
+  d.set("controlOptions", {router_enabled: true, csrf: "synthetic-csrf",
+    router_targets: [{key: "example-key", mac: "02:00:00:00:00:01"}]});
+  await d.run("previewRouterAction('unblock')");
+  assert.equal(calls.length, 1);
+  assert.equal(d.element("router-action-confirmation").hidden, false);
+  assert.match(d.element("router-action-scope").textContent, /Unblock router block.*Example client.*02:00:00:00:00:01.*192.0.2.10.*BLOCKED.*private/);
+  assert.match(d.element("router-action-impact").textContent, /EVEN if set outside/);
+  assert.equal(d.element("router-action-apply").textContent, "Confirm: Unblock router block");
+  await d.run("applyRouterAction()");
+  await d.run("applyRouterAction()");
+  assert.equal(calls.length, 2);
+  assert.equal(JSON.stringify(calls[1][1]), '{"token":"router-confirmation"}');
+  assert.equal(calls[1][2], 35000);
+  assert.equal(calls[1][3]["X-Linkwatch-Control"], "synthetic-csrf");
+  assert.match(d.element("router-action-status").textContent, /effective access not tested/);
+});
+
+test("router cancellation, expiry, selection change and unverified outcomes never auto-retry", async () => {
+  const d = dashboard(), calls = [];
+  d.set("selectedClient", "example-key");
+  d.set("controlOptions", {router_enabled: true, csrf: "synthetic-csrf",
+    router_targets: [{key: "example-key", mac: "02:00:00:00:00:01"}]});
+  const plan = {key: "example-key", token: "synthetic", expires: Date.now() + 60000};
+  d.context.api = async (...args) => { calls.push(args); throw Error("command accepted; readback unverified"); };
+  d.set("routerPlan", plan); d.run("cancelRouterAction()");
+  await d.run("applyRouterAction()");
+  d.set("routerPlan", {...plan, expires: 0});
+  await d.run("applyRouterAction()");
+  assert.match(d.element("router-action-status").textContent, /expired/);
+  d.set("routerPlan", {...plan, key: "another-device"});
+  await d.run("applyRouterAction()");
+  assert.equal(calls.length, 0);
+  d.set("routerPlan", plan);
+  await d.run("applyRouterAction()");
+  await d.run("applyRouterAction()");
+  assert.equal(calls.length, 1);
+  assert.match(d.element("router-action-status").textContent, /unverified.*Inspect UniFi before retrying/);
+  d.run("controlOptions.router_enabled = false; renderRouterControls()");
+  assert.equal(d.element("router-action-buttons").hidden, true);
 });

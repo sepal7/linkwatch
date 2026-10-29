@@ -29,7 +29,10 @@ Discovery is opt-in; it does not scan your LAN or change device settings.
 Every connector is optional and disabled by default.
 **Devices & activity** puts router application snapshots beside DNS decisions.
 Enable `unifi_activity_enabled` to use the local read-only connection. Traffic
-is evidence, not screen time or proof of what someone saw; manage blocks in UniFi.
+is evidence, not screen time or proof of what someone saw.
+Optional confirmed controls add kids-group DNS allow/deny and manual UniFi
+network block/unblock. Both start **disabled**; router unblocking can clear an
+administrator's shared block flag. [Control setup and impact](network_monitor/CONNECTIONS.md#optional-manual-router-controls).
 
 **[Connect data sources →](network_monitor/CONNECTIONS.md)**
 

@@ -97,6 +97,11 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
       </section>
       <label class="device-search">Find a device <input id="device-search" type="search" placeholder="Name, IP or connection" autocomplete="off"></label>
       <p id="devices-status" class="subtle" role="status">Loading optional inventory…</p>
+      <section id="router-recovery" class="panel" hidden>
+        <h3>Configured router-control targets</h3>
+        <p class="subtle">A blocked device may disappear from connected inventory. Select its explicitly configured MAC here to open controls, including after a Linkwatch restart. No action runs automatically.</p>
+        <div class="actions"><label>Device MAC <select id="router-target"></select></label><button id="router-target-open">Open device controls</button></div>
+      </section>
       <section class="panel" id="client-detail" aria-labelledby="client-title" hidden>
         <div class="section-heading"><h3 id="client-title" tabindex="-1">Device details</h3><div class="actions"><button id="client-refresh">Refresh details</button><button id="client-close">Close</button></div></div>
         <p id="client-evidence-status" class="subtle" role="status"></p>
@@ -124,13 +129,29 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
           <button id="client-dns">Load recent DNS activity</button><p id="client-dns-note" role="status" class="subtle">DNS is loaded only on request, not continuously copied.</p>
           <label class="device-search">Search loaded DNS <input id="client-dns-search" type="search" placeholder="Domain, type, outcome" autocomplete="off" disabled></label>
           <p id="client-dns-count" class="subtle" role="status">Load recent DNS activity to search up to 100 returned queries. This does not search the full DNS history.</p>
+          <p id="dns-actions-setup" class="subtle">To preview exact-domain DNS rules, configure existing non-Default kids groups and enable pihole_actions_enabled in app Configuration. The feature starts disabled and preserves group memberships.</p>
+          <section id="dns-action-confirmation" class="device-evidence" aria-labelledby="dns-action-title" hidden>
+            <h4 id="dns-action-title" tabindex="-1">Confirm DNS group rule</h4>
+            <p id="dns-action-scope"></p><p id="dns-action-impact" class="subtle"></p>
+            <div class="actions"><button id="dns-action-apply">Confirm exact-domain rule</button><button id="dns-action-cancel">Cancel</button></div>
+          </section>
+          <p id="dns-action-status" role="status" class="subtle"></p>
           <div class="table-scroll" tabindex="0" role="region" aria-label="Recent DNS activity"><table><thead><tr><th>Time</th><th>Domain / type</th><th>DNS outcome</th><th>Reply</th></tr></thead><tbody id="client-queries"></tbody></table></div>
         </section>
         <section class="device-evidence" aria-labelledby="restrictions-title">
-          <h3 id="restrictions-title">Network restrictions</h3>
-          <p>Manage blocks and schedules in UniFi. Linkwatch does not change router or DNS rules, and these observations do not prove which rules currently apply.</p>
+          <h3 id="restrictions-title" tabindex="-1">Network restrictions</h3>
+          <p>Router blocks, schedules and DNS group rules are separate restrictions. Traffic observations do not prove which restrictions currently apply.</p>
+          <p id="router-actions-setup" class="subtle">Manual router controls are off. Configure a separate control account, allowed client MACs and the Home Assistant host IP before enabling unifi_controls_enabled.</p>
+          <div id="router-action-buttons" class="actions" hidden><button id="router-block">Block network access…</button><button id="router-unblock">Unblock router block…</button></div>
+          <section id="router-action-confirmation" class="device-evidence" aria-labelledby="router-action-title" hidden>
+            <h4 id="router-action-title" tabindex="-1">Confirm manual router action</h4>
+            <p id="router-action-scope"></p>
+            <p id="router-action-impact" class="subtle"></p>
+            <div class="actions"><button id="router-action-apply">Confirm router action</button><button id="router-action-cancel">Cancel</button></div>
+          </section>
+          <p id="router-action-status" class="subtle" role="status" aria-live="polite"></p>
           <a id="unifi-console-link" href="unifi-console" target="_blank" rel="noopener noreferrer" hidden>Manage restrictions in UniFi ↗</a>
-          <p class="subtle">Pause/resume is not available here: the controller's shared block flag cannot safely distinguish a Linkwatch block from an existing administrator restriction. A network block may also affect LAN access, not only internet.</p>
+          <p class="subtle">A network block may affect LAN access too. Unblock clears the shared router flag, including blocks set outside Linkwatch, without removing separate firewall, schedule or DNS rules; Linkwatch never unblocks automatically.</p>
         </section>
         <details class="device-evidence"><summary>Connection details &amp; shared incidents</summary>
         <div id="client-body"></div>
