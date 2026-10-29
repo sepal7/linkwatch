@@ -1,5 +1,5 @@
 name: Linkwatch
-version: "1.3.0"
+version: "1.3.1"
 slug: home_network_monitor
 description: Local network health, traffic, device evidence and outage alerts
 url: https://github.com/sepal7/linkwatch

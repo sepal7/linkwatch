@@ -139,9 +139,28 @@ controllers; it is not used as a fallback or proof of inactivity.
 
 The optional official API key enriches IDs with application/category names
 through filtered `GET /integration/v1/dpi/applications` and `/dpi/categories`.
-These official endpoints are **catalogs, not traffic measurements**. Without
-the key or a usable catalog, numeric IDs remain visible rather than invented
-labels. Classification can be incomplete, delayed or wrong.
+These official endpoints are **catalogs, not traffic measurements**. Traffic's
+application number is local to its category. The official application catalog
+uses the packed ID **`(category << 16) + application`**, as in the maintained
+community adapter's `DPIMap.GetApp`; a raw application-number lookup can match
+an unrelated service from another category. Linkwatch 1.3.1 corrects that bug.
+It fetches exact filtered IDs from your controller, follows bounded pagination
+(eight pages maximum), and rejects unexpected IDs or incomplete responses.
+It does not ship a stale third-party name database or guess labels from DNS.
+The `65535` application and `255` category sentinel records stay unidentified.
+Missing exact matches stay unresolved. Without the key or a usable catalog,
+numeric IDs remain in technical evidence rather than invented labels.
+Classification can still be incomplete, delayed or wrong.
+
+The main view ranks **named services by reported bytes**, with separate visible
+coverage for named services, network protocols and unidentified records.
+Protocol grouping uses only the controller's explicitly named network,
+management or private protocol categories; it is presentation, not enforcement.
+Every returned row and byte remains accessible under **All traffic & technical
+evidence**, including unresolved IDs, router category text and duration estimates.
+Missing byte counts make totals incomplete and percentage shares unavailable.
+No category label, including a content-sensitive label, proves a page visit,
+viewed content or a policy violation, and no such label generates an alert.
 
 Received/transmitted fields follow the v2 API's `bytes_received` and
 `bytes_transmitted` exactly; they are not relabeled verified WAN download/upload.
@@ -165,6 +184,13 @@ labeled independently. A MAC identifies a network interface, **not a person**;
 private/randomized MAC changes create separate identities. No name/IP guesses
 merge them. Stale inventory or a changed binding during a read rejects the
 activity result.
+
+**Search loaded DNS** filters the currently loaded snapshot by domain, DNS query
+type or outcome, case-insensitively. Matching/loaded counts and the query window
+remain visible. It does not fetch more records or search full Pi-hole history;
+at most 100 queries from the last 30 minutes/current binding are available.
+Loading a new snapshot replaces the search data; opening another device clears
+it. No allow/deny or device-block writes are introduced in this patch.
 
 Application snapshots are sensitive: at most 16 are cached in memory, reused
 for 30 seconds, and automatically evicted within 60 seconds even without
@@ -345,6 +371,7 @@ activity.
 - [Official UniFi local API](https://help.ui.com/hc/en-us/articles/30076656117655-Getting-Started-with-the-Official-UniFi-API)
 - [UniFi Network 10.6.109 OpenAPI](https://developer.ui.com/network/v10.6.109/openapi.json)
 - [Community UniFi v2 traffic adapter and schema](https://github.com/unpoller/unifi/blob/master/traffic.go)
+- [Community category/application composite lookup](https://github.com/unpoller/unifi/blob/master/dpi.go)
 - [Community adapter path and millisecond parameters](https://github.com/unpoller/unifi/blob/master/types.go)
 - [Pi-hole API and version-specific local docs](https://docs.pi-hole.net/api/)
 - [Pi-hole session authentication](https://docs.pi-hole.net/api/auth/)

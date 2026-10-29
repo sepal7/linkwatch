@@ -27,6 +27,10 @@ def report(mac=MAC, rows=None):
         {"application": 101, "category": 7, "total_bytes": 9000,
          "bytes_received": 8000, "bytes_transmitted": 1000, "activity_seconds": 25}]}]}
 
+def catalog(rows, *, offset=0, total=None):
+    return {"data": rows, "count": len(rows), "totalCount": len(rows) if total is None else total,
+            "offset": offset, "limit": 200}
+
 
 class ActivityTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -42,8 +46,8 @@ class ActivityTests(unittest.IsolatedAsyncioTestCase):
         self.activity = Activity(self.telemetry)
         self.telemetry.legacy_request = AsyncMock(return_value=report())
         self.telemetry.request = AsyncMock(side_effect=[
-            {"data": [{"id": 101, "name": "Example application"}]},
-            {"data": [{"id": 7, "name": "Example category"}]}])
+            catalog([{"id": (7 << 16) + 101, "name": "Example application"}]),
+            catalog([{"id": 7, "name": "Example category"}])])
 
     async def asyncTearDown(self):
         await self.activity.close()
@@ -59,6 +63,8 @@ class ActivityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call.kwargs["params"]["includeUnidentified"], "true")
         app = result["applications"][0]
         self.assertEqual(app["application"], "Example application")
+        self.assertEqual(app["catalog_id"], (7 << 16) + 101)
+        self.assertEqual(self.telemetry.request.await_args_list[0].kwargs["params"]["filter"], "id.in(458853)")
         self.assertEqual(app["category"], "Example category")
         self.assertEqual(app["received_bytes"], 8000)
         self.assertEqual(app["controller_activity_seconds"], 25)
@@ -112,6 +118,8 @@ class ActivityTests(unittest.IsolatedAsyncioTestCase):
             report(rows=[{"application": 1, "category": 2, "total_bytes": "1000"}]),
             report(rows=[{"application": 1, "category": 2, "total_bytes": float("inf")}]),
             report(rows=[{"application": True, "category": 2}]),
+            report(rows=[{"application": 65536, "category": 2}]),
+            report(rows=[{"application": 1, "category": 32768}]),
             report(rows=[{"application": 1, "category": 2}] * 2),
             report(rows=[{"application": i, "category": 2} for i in range(201)]),
             {"client_usage_by_app": [{"client": {"mac": None}}]},
@@ -143,6 +151,87 @@ class ActivityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("API key not configured", result["catalog_error"])
         self.telemetry.request.assert_not_awaited()
 
+    async def test_composite_ids_never_reuse_same_local_id_across_categories(self):
+        self.telemetry.legacy_request.return_value = report(rows=[
+            {"application": 9, "category": 0, "total_bytes": 100},
+            {"application": 9, "category": 13, "total_bytes": 200},
+            {"application": 9, "category": 24, "total_bytes": 300},
+        ])
+
+        async def labels(session, method, url, **kwargs):
+            if url.endswith("/applications"):
+                self.assertEqual(kwargs["params"]["filter"], "id.in(9,851977,1572873)")
+                return catalog([{"id": 9, "name": "Example messaging"},
+                                {"id": 851977, "name": "Example web service"}])
+            return catalog([{"id": 0, "name": "Messaging"}, {"id": 13, "name": "Web services"},
+                            {"id": 24, "name": "Example category"}])
+
+        self.telemetry.request.side_effect = labels
+        apps = (await self.activity.snapshot(KEY, 1800))["applications"]
+        self.assertEqual([app["application"] for app in apps],
+                         ["Example messaging", "Example web service", None])
+        self.assertEqual(sum(app["total_bytes"] for app in apps), 600)
+
+    async def test_unknown_sentinels_never_receive_service_names(self):
+        self.telemetry.legacy_request.return_value = report(rows=[
+            {"application": 65535, "category": 13, "total_bytes": 100},
+            {"application": 1, "category": 255, "total_bytes": 200},
+        ])
+        self.telemetry.request.side_effect = None
+        self.telemetry.request.return_value = catalog([{"id": 13, "name": "Web services"}])
+        apps = (await self.activity.snapshot(KEY, 1800))["applications"]
+        self.assertTrue(all(app["unidentified"] and app["application"] is None for app in apps))
+        self.telemetry.request.assert_awaited_once()
+        self.assertTrue(self.telemetry.request.call_args.args[2].endswith("/categories"))
+
+    async def test_catalog_pagination_reads_server_clamped_pages(self):
+        self.telemetry.request.side_effect = [
+            catalog([{"id": 458853, "name": "First service"}], total=2),
+            catalog([{"id": 458854, "name": "Second service"}], offset=1, total=2)]
+        names = await self.activity.names("applications", {458853, 458854})
+        self.assertEqual(names, {458853: "First service", 458854: "Second service"})
+        self.assertEqual([call.kwargs["params"]["offset"] for call in self.telemetry.request.await_args_list],
+                         [0, 1])
+
+    async def test_catalog_rejects_wrong_namespace_ignored_filter_and_incomplete_pages(self):
+        cases = [
+            [catalog([{"id": 101, "name": "Wrong namespace"}])],
+            [catalog([{"id": 458853, "name": "First"}], total=500)],
+            [{"data": [{"id": 458853, "name": "First"}]}],
+            [catalog([{"id": 458853, "name": "First"}], total=2), catalog([], offset=1, total=2)],
+            [catalog([{"id": 458853, "name": "First"}], total=2),
+             catalog([{"id": 458853, "name": "Repeated"}], offset=1, total=2)],
+            [catalog([{"id": 458853, "name": "First"}], total=2),
+             catalog([{"id": 458854, "name": "Second"}], offset=1, total=3)],
+        ]
+        for responses in cases:
+            with self.subTest(responses=responses):
+                self.telemetry.request.side_effect = responses
+                with self.assertRaises(SourceError):
+                    await self.activity.names("applications", {458853, 458854})
+
+    async def test_catalog_page_limit_rejects_truncation_not_partial_labels(self):
+        async def labels(session, method, url, **kwargs):
+            offset = kwargs["params"]["offset"]
+            return catalog([{"id": offset, "name": "Example label"}], offset=offset, total=9)
+
+        self.telemetry.request.side_effect = labels
+        with self.assertRaisesRegex(SourceError, "eight-page"):
+            await self.activity.names("applications", set(range(9)))
+        self.assertEqual(self.telemetry.request.await_count, 8)
+
+    async def test_catalogs_fail_independently_without_discarding_valid_service_names(self):
+        async def labels(session, method, url, **kwargs):
+            if url.endswith("/categories"):
+                raise SourceError("HTTP 403")
+            return catalog([{"id": 458853, "name": "Exact service"}])
+
+        self.telemetry.request.side_effect = labels
+        result = await self.activity.snapshot(KEY, 1800)
+        self.assertEqual(result["applications"][0]["application"], "Exact service")
+        self.assertIsNone(result["applications"][0]["category"])
+        self.assertIsNotNone(result["catalog_error"])
+
     async def test_identity_change_during_read_rejects_result(self):
         async def changed(*args, **kwargs):
             self.telemetry.devices[KEY]["binding_start"] += 1
@@ -159,7 +248,7 @@ class ActivityTests(unittest.IsolatedAsyncioTestCase):
         self.telemetry.legacy_request.assert_awaited_once()
         self.telemetry.devices[KEY]["binding_start"] += 1
         self.telemetry.request.side_effect = None
-        self.telemetry.request.return_value = {"data": []}
+        self.telemetry.request.return_value = catalog([])
         await self.activity.snapshot(KEY, 1800)
         self.assertEqual(self.telemetry.legacy_request.await_count, 2)
         expires = self.activity.cache[(KEY, 1800)]["created"] + 61
@@ -171,7 +260,7 @@ class ActivityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cache_maximum_sixteen_snapshots(self):
         self.telemetry.request.side_effect = None
-        self.telemetry.request.return_value = {"data": []}
+        self.telemetry.request.return_value = catalog([])
         for i in range(17):
             mac = f"02:00:00:00:01:{i:02x}"
             key = client_key(mac)
@@ -211,7 +300,7 @@ class ActivityTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await client.get(f"/api/clients/{KEY}/activity?seconds={value}")).status, 400)
             for seconds in (1800, 3600, 86400):
                 self.telemetry.request.side_effect = None
-                self.telemetry.request.return_value = {"data": []}
+                self.telemetry.request.return_value = catalog([])
                 response = await client.get(f"/api/clients/{KEY}/activity?seconds={seconds}")
                 self.assertEqual(response.status, 200)
             response = await client.get("/unifi-console?target=https://untrusted.example", allow_redirects=False)

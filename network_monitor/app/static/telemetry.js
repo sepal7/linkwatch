@@ -1,6 +1,7 @@
 "use strict";
 let telemetryData = null, selectedClient = null, clientRequest = 0;
 let activityRequest = 0;
+let loadedDNS = null;
 const bytes = value => {
   if (!Number.isFinite(value)) return "Unavailable";
   const units = ["B", "kB", "MB", "GB", "TB"];
@@ -115,12 +116,16 @@ async function openClient(key) {
   $("client-detail").hidden = false; $("client-title").textContent = "Loading device…";
   $("client-evidence-status").textContent = "Loading controller evidence…";
   $("client-activity-results").hidden = true;
-  $("client-applications").replaceChildren(); $("client-categories").replaceChildren();
+  $("client-applications").replaceChildren(); $("client-traffic-technical").replaceChildren();
   $("client-activity").disabled = true;
   $("client-activity-note").textContent = telemetryData?.activity_enabled ?
     "Loads only on request; the selected window applies to router applications, not DNS." :
     "Enable unifi_activity_enabled in app Configuration, save and restart to allow application reads with your local read-only UniFi account.";
   $("client-body").replaceChildren(); $("client-queries").replaceChildren();
+  loadedDNS = null;
+  $("client-dns-search").value = "";
+  $("client-dns-search").disabled = true;
+  $("client-dns-count").textContent = "Load recent DNS activity to search up to 100 returned queries. This does not search the full DNS history.";
   $("client-dns-note").textContent = "DNS loads only on request; queries are not browsing history.";
   $("client-dns").disabled = true;
   try {
@@ -175,34 +180,54 @@ function renderActivity(data) {
   $("client-activity-results").hidden = false;
   $("client-activity-note").textContent = `${formatTime(data.from)} – ${formatTime(data.to)} · fetched ${formatTime(data.fetched)}. Snapshot does not refresh automatically.`;
   const body = $("client-applications"); body.replaceChildren();
-  const groups = new Map();
+  const technical = $("client-traffic-technical"); technical.replaceChildren();
+  const groups = {
+    services: {rows: 0, bytes: 0, complete: true},
+    protocols: {rows: 0, bytes: 0, complete: true},
+    unidentified: {rows: 0, bytes: 0, complete: true}
+  };
   let total = 0, complete = true;
   const applications = [...data.applications].sort((a, b) => (b.total_bytes ?? -1) - (a.total_bytes ?? -1));
   for (const app of applications) {
-    const name = app.application || `Application ID ${app.application_id}`;
-    const category = app.category || `Category ID ${app.category_id}`;
-    const row = document.createElement("tr"), cell = text("td", name);
-    cell.append(text("div", category, "subtle"));
+    const protocol = /^(network|management|private) protocols(?:\b|_)/i.test(app.category || "");
+    const group = !app.application || app.unidentified ? groups.unidentified : protocol ? groups.protocols : groups.services;
+    group.rows++;
+    if (Number.isFinite(app.total_bytes)) {
+      total += app.total_bytes; group.bytes += app.total_bytes;
+    } else {
+      complete = false; group.complete = false;
+    }
+    const row = document.createElement("tr");
+    const cell = text("td", app.application || "Unidentified service");
+    cell.append(text("div", `${app.category || "Unresolved category"} · category ${app.category_id}, app ${app.application_id}, catalog ${app.catalog_id ?? "unavailable"}`, "subtle"));
     row.append(cell, text("td", bytes(app.total_bytes)),
       text("td", `${bytes(app.received_bytes)} / ${bytes(app.transmitted_bytes)}`),
       text("td", Number.isFinite(app.controller_activity_seconds) ?
-        `${duration(app.controller_activity_seconds)} · router estimate, not screen time` : "Not reported"));
-    body.append(row);
-    if (Number.isFinite(app.total_bytes)) total += app.total_bytes; else complete = false;
-    const group = groups.get(app.category_id) || {name: category, total: 0, complete: true};
-    if (Number.isFinite(app.total_bytes)) group.total += app.total_bytes; else group.complete = false;
-    groups.set(app.category_id, group);
+        `${duration(app.controller_activity_seconds)} · overlapping estimate, not screen time` : "Not reported"));
+    technical.append(row);
+    if (group === groups.services) {
+      const service = document.createElement("tr");
+      service.append(text("td", app.application), text("td", bytes(app.total_bytes)));
+      service.dataset.bytes = Number.isFinite(app.total_bytes) ? String(app.total_bytes) : "";
+      body.append(service);
+    }
+  }
+  for (const row of body.children) {
+    const value = row.dataset.bytes === "" ? null : Number(row.dataset.bytes);
+    row.append(text("td", complete && total > 0 && value !== null ? `${(value / total * 100).toFixed(1)}%` : "Unavailable"));
   }
   $("activity-summary").textContent = applications.length ?
-    `${applications.length} reported application rows · ${complete ? bytes(total) + " summed reported bytes" : "Some byte totals unavailable"}. Not a complete WAN usage total.` :
-    "No visible application records. Traffic Identification, API support, permissions or classification delay may limit results; this does not prove no use.";
-  if (!applications.length) emptyRow(body, "No application activity returned by the controller.");
-  const categories = $("client-categories"); categories.replaceChildren();
-  for (const group of [...groups.values()].sort((a, b) => b.total - a.total)) {
-    const line = text("p", group.name);
-    line.append(text("strong", group.complete ? bytes(group.total) : "Incomplete totals")); categories.append(line);
+    `${groups.services.rows} recognized service${groups.services.rows === 1 ? "" : "s"} · ${complete ? bytes(total) + " reported across all traffic" : "Some traffic totals unavailable"}.` :
+    "No visible traffic returned. This does not prove no use.";
+  $("activity-coverage").textContent = Object.entries(groups).map(([key, group]) =>
+    `${{services: "Named services", protocols: "Network protocols", unidentified: "Unidentified services"}[key]}: ${group.complete ? bytes(group.bytes) : bytes(group.bytes) + " known; incomplete"} (${group.rows} row${group.rows === 1 ? "" : "s"})`
+  ).join(" · ");
+  if (!body.children.length) {
+    emptyRow(body, applications.length ?
+      "No recognizable services resolved for this window. See unidentified coverage and technical evidence; this is not evidence of inactivity." :
+      "No application evidence available. Check Traffic Identification and source status.", 3);
   }
-  if (!groups.size) categories.append(text("p", "No category measurements available.", "subtle"));
+  if (!technical.children.length) emptyRow(technical, "No router traffic rows returned.");
   $("activity-limits").textContent = `${data.scope} ${data.warning} ${data.identity_note}${data.private_mac ? " This is a locally administered/private MAC." : ""}`;
   if (data.catalog_error) $("client-activity-note").textContent += ` ${data.catalog_error}`;
 }
@@ -226,22 +251,40 @@ async function loadClientActivity() {
 }
 async function loadClientDNS() {
   const key = selectedClient, request = clientRequest;
+  loadedDNS = null;
   $("client-queries").replaceChildren();
+  $("client-dns-search").disabled = true;
+  $("client-dns-count").textContent = "Loading bounded DNS snapshot…";
   $("client-dns").disabled = true; $("client-dns-note").textContent = "Loading up to 100 recent DNS requests…";
   try {
     const data = await api(`api/clients/${encodeURIComponent(key)}/dns`);
     if (request !== clientRequest) return;
     $("client-dns-note").textContent = `${data.matched_by} · since ${formatTime(data.from)} · fetched ${formatTime(data.fetched)}. ${data.warning}`;
-    const body = $("client-queries"); body.replaceChildren();
-    for (const q of data.queries) {
-      const row = document.createElement("tr");
-      row.append(text("td", formatTime(q.ts)), text("td", `${q.domain || "Hidden"} · ${q.type || "—"}`),
-        text("td", q.status || "Unknown"), text("td", `${q.reply || "Unknown"} · ${ms(q.reply_ms)}`)); body.append(row);
-    }
-    if (!body.children.length) emptyRow(body, "No visible DNS requests in this binding window. This does not mean no activity.");
+    loadedDNS = data;
+    $("client-dns-search").disabled = false;
+    renderClientDNS();
   } catch (error) {
-    if (request === clientRequest) $("client-dns-note").textContent = `DNS unavailable: ${error.message}`;
+    if (request === clientRequest) {
+      $("client-dns-note").textContent = `DNS unavailable: ${error.message}`;
+      $("client-dns-count").textContent = "No loaded DNS snapshot to search.";
+    }
   } finally { if (request === clientRequest) $("client-dns").disabled = false; }
+}
+function renderClientDNS() {
+  if (!loadedDNS) return;
+  const search = $("client-dns-search").value.trim().toLowerCase();
+  const queries = loadedDNS.queries.filter(q =>
+    [q.domain, q.type, q.status].some(value => String(value ?? "").toLowerCase().includes(search)));
+  const body = $("client-queries"); body.replaceChildren();
+  for (const q of queries) {
+    const row = document.createElement("tr");
+    row.append(text("td", formatTime(q.ts)), text("td", `${q.domain || "Hidden"} · ${q.type || "—"}`),
+      text("td", q.status || "Unknown"), text("td", `${q.reply || "Unknown"} · ${ms(q.reply_ms)}`)); body.append(row);
+  }
+  $("client-dns-count").textContent = `${queries.length} matching / ${loadedDNS.queries.length} loaded (maximum ${loadedDNS.limit ?? 100}) · ${formatTime(loadedDNS.from)} – ${formatTime(loadedDNS.fetched)}. Search covers only this loaded snapshot, not full DNS history.`;
+  if (!body.children.length) emptyRow(body, loadedDNS.queries.length ?
+    "No loaded queries match this search. Clear the search or load a newer snapshot." :
+    "No visible DNS requests in this binding window. This does not mean no activity.");
 }
 async function pollTelemetry() {
   try {
@@ -267,8 +310,9 @@ async function pollTelemetry() {
 }
 $("device-search").addEventListener("input", renderDevices);
 $("client-refresh").addEventListener("click", () => { if (selectedClient) openClient(selectedClient); });
-$("client-close").addEventListener("click", () => { clientRequest++; selectedClient = null; $("client-detail").hidden = true; $("devices-title").focus(); });
+$("client-close").addEventListener("click", () => { clientRequest++; selectedClient = null; loadedDNS = null; $("client-detail").hidden = true; $("devices-title").focus(); });
 $("client-dns").addEventListener("click", loadClientDNS);
+$("client-dns-search").addEventListener("input", renderClientDNS);
 $("client-activity").addEventListener("click", loadClientActivity);
 $("activity-window").addEventListener("change", () => {
   activityRequest++;

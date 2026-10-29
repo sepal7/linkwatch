@@ -101,15 +101,20 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
         <div class="section-heading"><h3 id="client-title" tabindex="-1">Device details</h3><div class="actions"><button id="client-refresh">Refresh details</button><button id="client-close">Close</button></div></div>
         <p id="client-evidence-status" class="subtle" role="status"></p>
         <section class="device-evidence" aria-labelledby="activity-title">
-          <div class="section-heading"><h3 id="activity-title">Router applications</h3><label>Window <select id="activity-window"><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="86400">24 hours</option></select></label></div>
-          <p class="subtle">A controller snapshot, not all destination traffic or proof of what someone watched or played. Application labels can be wrong or missing.</p>
+          <div class="section-heading"><h3 id="activity-title">Services used by this device</h3><label>Window <select id="activity-window"><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="86400">24 hours</option></select></label></div>
+          <p class="subtle">Recognized services ranked by traffic, not time spent. Downloads and background connections can appear without someone actively using a service.</p>
           <button id="client-activity">Load router traffic &amp; activity</button>
           <p id="client-activity-note" class="subtle" role="status">Loads only on request. Enable unifi_activity_enabled in app Configuration; the local read-only UniFi account is required.</p>
           <div id="client-activity-results" hidden>
             <p id="activity-summary"></p>
-            <div class="table-scroll" tabindex="0" role="region" aria-label="Router application traffic"><table><thead><tr><th>Application / category</th><th>Reported bytes</th><th>Received / transmitted</th><th>Activity estimate</th></tr></thead><tbody id="client-applications"></tbody></table></div>
-            <p class="subtle">Received/transmitted are the API's reported byte counters, not verified internet-only download/upload. Decimal units: 1 MB = 1,000,000 bytes. Activity estimates are controller-defined, not measured foreground use.</p>
-            <details><summary>Category totals</summary><p class="subtle">Sum of returned application bytes per category, not all internet traffic or time spent.</p><div id="client-categories"></div></details>
+            <p id="activity-coverage" class="subtle"></p>
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Recognized services ranked by traffic"><table class="service-traffic"><thead><tr><th>Recognized service</th><th>Traffic</th><th aria-label="Share of all reported bytes">Share</th></tr></thead><tbody id="client-applications"></tbody></table></div>
+            <p class="subtle">This is not a screen-time report or complete internet usage. Protocol and unidentified traffic remain included in the coverage totals and technical evidence below.</p>
+            <details><summary>All traffic &amp; technical evidence</summary>
+              <p class="subtle">Every returned row, including protocols and unresolved names. Category text is an unverified router classification, not proof of content viewed or a rule violation. No category triggers an accusation or alert.</p>
+              <div class="table-scroll" tabindex="0" role="region" aria-label="All router traffic measurements"><table><thead><tr><th>Router label / IDs</th><th>Reported bytes</th><th>Received / transmitted</th><th>Router activity estimate</th></tr></thead><tbody id="client-traffic-technical"></tbody></table></div>
+              <p class="subtle">Received/transmitted are the API's counters, not verified internet-only download/upload. Decimal units: 1 MB = 1,000,000 bytes. Activity estimates can overlap across rows and include background traffic; they cannot be summed into time played or watched.</p>
+            </details>
             <details><summary>Evidence and identity limits</summary><p id="activity-limits" class="subtle"></p></details>
           </div>
         </section>
@@ -117,6 +122,8 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
           <h3 id="dns-title">DNS activity</h3>
           <p class="subtle">Pi-hole decisions, alongside router evidence. A permitted DNS answer is not proof of a page visit; a blocked domain is not an internet outage.</p>
           <button id="client-dns">Load recent DNS activity</button><p id="client-dns-note" role="status" class="subtle">DNS is loaded only on request, not continuously copied.</p>
+          <label class="device-search">Search loaded DNS <input id="client-dns-search" type="search" placeholder="Domain, type, outcome" autocomplete="off" disabled></label>
+          <p id="client-dns-count" class="subtle" role="status">Load recent DNS activity to search up to 100 returned queries. This does not search the full DNS history.</p>
           <div class="table-scroll" tabindex="0" role="region" aria-label="Recent DNS activity"><table><thead><tr><th>Time</th><th>Domain / type</th><th>DNS outcome</th><th>Reply</th></tr></thead><tbody id="client-queries"></tbody></table></div>
         </section>
         <section class="device-evidence" aria-labelledby="restrictions-title">

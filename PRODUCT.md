@@ -60,3 +60,7 @@ screen time or viewed content. Application snapshots are briefly memory-only;
 no full destination capture, HTTPS interception or browsing profile is added.
 The user chose to manage blocking in UniFi for now: no write credentials or
 router control backend, only a configured-origin link for existing restrictions.
+The device view prioritizes exact controller-named services ranked by bytes,
+with named/protocol/unidentified coverage visible. Raw IDs, unverified category
+text and overlapping time estimates belong in expandable technical evidence.
+Names must match the category/application composite, not a local app ID alone.

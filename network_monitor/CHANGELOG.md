@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.1
+
+- Fix incorrect service names: router traffic application numbers are local to
+  their category. Official catalog lookups now use the exact packed
+  `(category << 16) + application` ID, never a cross-category low-ID match.
+- Follow bounded catalog pagination and reject ignored filters, duplicate IDs
+  and incomplete pages. Unknown sentinel traffic stays unidentified.
+- Lead with recognizable services ranked by bytes and explicit named/protocol/
+  unidentified coverage. Retain every byte/row in expandable technical evidence;
+  overlapping duration estimates and raw categories no longer dominate the view.
+- Category labels, including content-sensitive ones, remain unverified router
+  classifications, never evidence of viewing, accusations or alerts.
+- Search loaded DNS by domain, query type or outcome, with matching/loaded
+  counts and the bounded query window. It does not search full Pi-hole history.
+
 ## 1.3.0
 
 - Device Traffic & activity entry with on-demand router application/category

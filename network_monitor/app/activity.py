@@ -56,22 +56,35 @@ class Activity:
         t = self.telemetry
         if not t.config.unifi_api_key or not identifiers:
             return {}
-        result = await t.request(
-            t.session, "GET", t.config.unifi_url.rstrip("/") +
-            "/proxy/network/integration/v1/dpi/" + kind,
-            headers={"X-API-KEY": t.config.unifi_api_key}, ssl=t.fingerprint,
-            params={"filter": "id.in(" + ",".join(str(i) for i in sorted(identifiers)) + ")",
-                    "limit": 200, "offset": 0})
-        rows = result.get("data")
-        if not isinstance(rows, list) or len(rows) > 200:
-            raise SourceError("Application name catalog schema is unsupported")
-        names = {}
-        for row in rows:
-            row = object_data(row)
-            identifier, name = row.get("id"), safe_text(row.get("name"), 120)
-            if type(identifier) is int and identifier in identifiers and name:
+        names, offset, seen, expected_total = {}, 0, set(), None
+        for _ in range(8):
+            result = await t.request(
+                t.session, "GET", t.config.unifi_url.rstrip("/") +
+                "/proxy/network/integration/v1/dpi/" + kind,
+                headers={"X-API-KEY": t.config.unifi_api_key}, ssl=t.fingerprint,
+                params={"filter": "id.in(" + ",".join(str(i) for i in sorted(identifiers)) + ")",
+                        "limit": 200, "offset": offset})
+            rows, count, total = result.get("data"), result.get("count"), result.get("totalCount")
+            if (not isinstance(rows, list) or len(rows) > 200 or type(count) is not int or
+                    count != len(rows) or type(total) is not int or
+                    not offset + count <= total <= len(identifiers) or
+                    type(result.get("offset")) is not int or result["offset"] != offset or
+                    expected_total is not None and total != expected_total):
+                raise SourceError("Name catalog pagination is unsupported or the ID filter was ignored")
+            expected_total = total
+            for row in rows:
+                row = object_data(row)
+                identifier, name = row.get("id"), safe_text(row.get("name"), 120)
+                if type(identifier) is not int or identifier not in identifiers or identifier in seen or not name:
+                    raise SourceError("Name catalog returned an unexpected or duplicate ID")
+                seen.add(identifier)
                 names[identifier] = name
-        return names
+            offset += count
+            if offset == total:
+                return names
+            if not count:
+                raise SourceError("Name catalog pagination stopped before completion")
+        raise SourceError("Name catalog exceeds the eight-page safety limit")
 
     async def snapshot(self, key, seconds):
         if type(seconds) is not int or seconds not in (1800, 3600, 86400):
@@ -112,10 +125,13 @@ class Activity:
                 row = object_data(row)
                 app, category = row.get("application"), row.get("category")
                 if (type(app) is not int or type(category) is not int or
-                        app < 0 or category < 0 or (app, category) in seen):
+                        not 0 <= app <= 65535 or not 0 <= category <= 32767 or (app, category) in seen):
                     raise SourceError("Application IDs are invalid or duplicated; cannot safely total traffic")
                 seen.add((app, category))
-                item = {"application_id": app, "category_id": category}
+                # Traffic IDs are category-local; the official catalog uses a packed ID.
+                item = {"application_id": app, "category_id": category,
+                        "catalog_id": (category << 16) + app,
+                        "unidentified": app == 65535 or category == 255}
                 for source, target in (("bytes_received", "received_bytes"),
                                        ("bytes_transmitted", "transmitted_bytes"),
                                        ("total_bytes", "total_bytes"),
@@ -128,15 +144,19 @@ class Activity:
                 applications.append(item)
             catalog_error = ("API key not configured; application/category IDs are shown"
                              if applications and not self.telemetry.config.unifi_api_key else None)
-            app_names, category_names = {}, {}
-            try:
-                app_names, category_names = await asyncio.gather(
-                    self.names("applications", {r["application_id"] for r in applications}),
-                    self.names("categories", {r["category_id"] for r in applications}))
-            except (SourceError, aiohttp.ClientError, TimeoutError, ValueError, TypeError):
+            catalogs = await asyncio.gather(
+                self.names("applications", {r["catalog_id"] for r in applications if not r["unidentified"]}),
+                self.names("categories", {r["category_id"] for r in applications if r["category_id"] != 255}),
+                return_exceptions=True)
+            for result in catalogs:
+                if isinstance(result, BaseException) and not isinstance(
+                        result, (SourceError, aiohttp.ClientError, TimeoutError, ValueError, TypeError)):
+                    raise result
+            app_names, category_names = [r if isinstance(r, dict) else {} for r in catalogs]
+            if any(isinstance(r, Exception) for r in catalogs):
                 catalog_error = "Name catalogs unavailable; numeric IDs are shown, not guessed labels"
             for item in applications:
-                item["application"] = app_names.get(item["application_id"])
+                item["application"] = app_names.get(item["catalog_id"])
                 item["category"] = category_names.get(item["category_id"])
             if self.identity(key) != identity:
                 raise SourceError("Device identity changed during activity read; reload device details")

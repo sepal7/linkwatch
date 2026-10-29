@@ -18,6 +18,7 @@ jobs:
       - run: ruff check .
       - run: node --check network_monitor/app/static/dashboard.js
       - run: node --check network_monitor/app/static/telemetry.js
+      - run: node --test tests/activity_ui.test.cjs
   image:
     runs-on: ubuntu-latest
     steps:
