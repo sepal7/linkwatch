@@ -57,8 +57,8 @@ function renderStatus(data) {
   $("current-latency").textContent = data.stale ? "—" : ms(data.last?.latency_ms);
   $("last-check").textContent = data.last ? `Checked ${duration(data.age_seconds)} ago${data.stale ? " · stale / previous run" : ""}` : "No observations yet";
   $("cadence").textContent = `Target ${data.interval_seconds}s · last cycle ${data.last?.cycle_seconds?.toFixed(1) ?? "—"}s`;
-  $("sampling-note").textContent = `Probing every ${data.interval_seconds}s (target); dashboard refreshes every 2s. ${data.interval_seconds > 2 ? "For faster detection, set interval_seconds: 2 and timeout_seconds: 1 in app Configuration, then restart. " : ""}Failures shorter than a sampling cycle can be missed. TCP checks are not bandwidth or ICMP packet loss.`;
-  $("retention").textContent = `Up to ${data.retention_days} days or ${data.max_samples.toLocaleString()} samples; the earlier limit wins. Pruning every 60 samples. Per-probe timeout ${data.timeout_seconds}s.`;
+  $("sampling-note").textContent = `${data.interval_seconds}s target · ${data.timeout_seconds}s timeout · UI 2s. Sub-cycle failures can be missed; TCP checks do not measure bandwidth or packet loss.`;
+  $("retention").textContent = `${data.retention_days} days / ${data.max_samples.toLocaleString()} samples maximum · ${data.timeout_seconds}s probe timeout`;
   $("footer-note").textContent = data.stale ? "No fresh observation" : `Probes ${data.interval_seconds}s · UI 2s · ${formatTime(data.last.ts)}`;
   const probes = $("probes");
   probes.replaceChildren();
@@ -74,7 +74,7 @@ function renderStatus(data) {
   const output = alerts.output === "local" ? "Pi / host speaker" : alerts.output === "both" ? "Host speaker + Cast" : alerts.output === "none" ? "No sound" : "Google Cast";
   $("sound-status").textContent = alerts.enabled ?
     `${alerts.muted ? "Muted" : "Enabled"} · ${output}${["cast", "both"].includes(alerts.output) ? " · " + alerts.target : ""}${alerts.phone_service ? " · " + alerts.phone_service : ""} · down after ${alerts.failure_seconds}s / recovery after ${alerts.recovery_seconds}s.` :
-    "Disabled. Choose sound_output and/or phone_notify_service, then enable alerts in app Configuration.";
+    "Alerts off · enable in HA app Configuration";
   $("mute").disabled = !alerts.enabled;
   $("mute").textContent = alerts.muted ? "Unmute alerts" : "Mute alerts";
   $("test-sound").disabled = !alerts.enabled || alerts.muted;
@@ -154,7 +154,7 @@ function renderIncidents() {
   body.replaceChildren();
   for (const item of filtered.slice(0, 100)) body.append(incidentRow(item));
   if (!body.children.length) body.append(text("p", "No matching incidents in this period.", "subtle"));
-  $("incident-note").textContent = `Showing ${Math.min(filtered.length, 100)} of ${filtered.length} matching intervals. Export CSV for all retained intervals in this period.`;
+  $("incident-note").textContent = `${Math.min(filtered.length, 100)} / ${filtered.length} intervals · CSV: all retained intervals in this period`;
 }
 function metric(list, label, value) {
   const item = document.createElement("div");
@@ -180,7 +180,7 @@ function renderInsights(data) {
     const old = data.previous;
     const latency = s.mean_ms !== null && old.mean_ms !== null ? ` Mean TCP ${ms(s.mean_ms)} vs ${ms(old.mean_ms)}.` : "";
     $("comparison").textContent = `${s.interruptions} interruptions vs ${old.interruptions}; ${duration(s.seconds.offline)} downtime vs ${duration(old.seconds.offline)}.${latency} Only observed time is included.`;
-  } else $("comparison").textContent = "Not enough comparable history yet. Both equal-length periods need at least 80% observed coverage before a trend comparison is shown.";
+  } else $("comparison").textContent = "Comparison unavailable · each period needs 80% observed coverage";
   $("period-title").textContent = data.period_seconds === 86400 ? "Daily breakdown" : "Hourly breakdown";
   const periods = $("periods");
   periods.replaceChildren();

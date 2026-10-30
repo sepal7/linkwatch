@@ -70,7 +70,8 @@ test("services rank by bytes; protocol, unresolved and sensitive category eviden
   assert.match(primary.children[1].textContent, /Example messaging.*100 B.*10.0%/);
   assert.doesNotMatch(primary.textContent, /TopSites|protocols|900s|1200s|Application ID/);
   assert.match(d.element("activity-coverage").textContent, /Named services: 800 B.*Network protocols: 150 B.*Unidentified services: 50 B/);
-  assert.match(d.element("activity-summary").textContent, /1.0 kB reported across all traffic/);
+  assert.match(d.element("activity-summary").textContent, /1.0 kB traffic.*2 named services/);
+  assert.equal(d.element("service-table").hidden, false);
   const technical = d.element("client-traffic-technical");
   assert.equal(technical.children.length, 4);
   assert.match(technical.textContent, /TopSites-Adult/);
@@ -81,11 +82,13 @@ test("unknown-only and incomplete snapshots do not claim inactivity or zero use"
   const d = dashboard();
   d.set("fixture", snapshot([app(null, "Web services", 100), app("Named", "Media", null)]));
   d.run("renderActivity(fixture)");
-  assert.match(d.element("activity-summary").textContent, /totals unavailable/);
+  assert.match(d.element("activity-summary").textContent, /totals incomplete/);
   assert.match(d.element("client-applications").textContent, /Named.*Unavailable.*Unavailable/);
   d.set("fixture", snapshot([app(null, "Unknown", 100)]));
   d.run("renderActivity(fixture)");
-  assert.match(d.element("client-applications").textContent, /No recognizable services.*not evidence of inactivity/);
+  assert.equal(d.element("client-applications").children.length, 0);
+  assert.equal(d.element("service-table").hidden, true);
+  assert.match(d.element("activity-summary").textContent, /100 B traffic.*services unidentified/);
   assert.match(d.element("activity-coverage").textContent, /Unidentified services: 100 B/);
   assert.equal(d.element("client-traffic-technical").children.length, 1);
 });
@@ -101,8 +104,8 @@ test("DNS search is case-insensitive across loaded domains, types and outcomes w
     ["gravity", "ads.example"], ["<example>", "<example>"]]) {
     d.element("client-dns-search").value = search;
     d.run("renderClientDNS()");
-    assert.match(d.element("client-dns-count").textContent, /1 matching \/ 3 loaded \(maximum 100\).*time:10.*time:20/);
-    assert.match(d.element("client-dns-count").textContent, /not full DNS history/);
+    assert.match(d.element("client-dns-count").textContent, /1 matching \/ 3 loaded.*time:10.*time:20/);
+    assert.match(d.element("client-dns-count").textContent, /loaded snapshot only \(limit 100\)/);
     assert.ok(d.element("client-queries").textContent.includes(expected));
   }
   d.element("client-dns-search").value = "missing";
@@ -114,7 +117,7 @@ test("DNS search is case-insensitive across loaded domains, types and outcomes w
   assert.equal(d.element("client-queries").children.length, 3);
   d.set("loadedDNS", {from: 10, fetched: 20, queries: []});
   d.run("renderClientDNS()");
-  assert.match(d.element("client-queries").textContent, /does not mean no activity/);
+  assert.match(d.element("client-queries").textContent, /No DNS queries in this binding window/);
 });
 
 test("DNS actions require a visible group-impact preview and only send the confirmed token once", async () => {
@@ -218,4 +221,62 @@ test("router cancellation, expiry, selection change and unverified outcomes neve
   assert.match(d.element("router-action-status").textContent, /unverified.*Inspect UniFi before retrying/);
   d.run("controlOptions.router_enabled = false; renderRouterControls()");
   assert.equal(d.element("router-action-buttons").hidden, true);
+});
+
+test("nonzero all-unidentified traffic has no empty service table and keeps catalog errors and every byte", () => {
+  const d = dashboard();
+  const fixture = snapshot(Array.from({length: 20}, (_, i) =>
+    app(null, null, 3305000, {application_id: i + 1, category_id: 13})));
+  fixture.catalogs = {
+    applications: {status: "error", code: "http_403", message: "API key lacks catalog permission", requested: 20, matched: 0},
+    categories: {status: "error", code: "timeout", message: "Catalog request timed out", requested: 1, matched: 0}
+  };
+  d.set("fixture", fixture); d.run("renderActivity(fixture)");
+  assert.equal(d.element("service-table").hidden, true);
+  assert.equal(d.element("client-applications").children.length, 0);
+  assert.equal(d.element("client-traffic-technical").children.length, 20);
+  assert.equal(d.element("activity-summary").textContent, "66.1 MB traffic · service names unavailable");
+  assert.match(d.element("catalog-status").textContent, /Services: API key lacks catalog permission \(http_403\).*Categories: Catalog request timed out \(timeout\)/);
+  assert.equal(d.element("catalog-details").open, false);
+  d.set("fixture", snapshot([])); d.run("renderActivity(fixture)");
+  assert.equal(d.element("service-table").hidden, true);
+  assert.equal(d.element("catalog-details").hidden, true);
+  assert.equal(d.element("activity-summary").textContent, "No traffic reported for this window");
+});
+
+test("DNS effective flags refresh from off to group 2; actions stay visible but gated without auto-enabling", async () => {
+  const d = dashboard();
+  d.set("loadedDNS", {from: 10, fetched: 20, limit: 100, queries: [
+    {ts: 11, domain: "example.com", type: "A", status: "FORWARDED"}]});
+  const options = {controls_schema: 2, dns_enabled: false, router_enabled: false, router_targets: [],
+    csrf: null, dns: {enabled: false, group_ids: [2], reason: "disabled", saved_settings: "match"}};
+  d.context.api = async () => structuredClone(options);
+  await d.run("loadControlOptions()");
+  const buttons = () => d.element("client-queries").children[0].children[4].children[0].children;
+  assert.equal(buttons().length, 2);
+  assert.equal(buttons()[0].disabled, true);
+  assert.match(d.element("dns-actions-setup").textContent, /off in the running app/);
+  options.dns.saved_settings = "different";
+  await d.run("loadControlOptions()");
+  assert.match(d.element("dns-actions-setup").textContent, /Saved DNS settings differ.*restart Linkwatch/);
+  assert.equal(buttons()[0].disabled, true);
+  options.dns.enabled = options.dns_enabled = true;
+  options.csrf = "new-runtime-token";
+  options.dns.saved_settings = "match"; options.dns.reason = "ready";
+  await d.run("loadControlOptions()");
+  assert.equal(buttons()[0].disabled, false);
+  assert.match(d.element("dns-actions-setup").textContent, /on.*groups 2/);
+  assert.match(d.element("dns-control-diagnostic").textContent, /enabled=true; group IDs=\[2\].*match running app/);
+  d.context.api = async () => { throw Error("offline"); };
+  await d.run("loadControlOptions()");
+  assert.equal(buttons()[0].disabled, true);
+  assert.match(d.element("dns-actions-setup").textContent, /settings unavailable.*offline/);
+});
+
+test("old control API or failed refresh cannot masquerade as disabled saved settings", async () => {
+  const d = dashboard();
+  d.context.api = async () => ({dns_enabled: false});
+  await d.run("loadControlOptions()");
+  assert.match(d.element("dns-actions-setup").textContent, /version mismatch/);
+  assert.doesNotMatch(d.element("dns-actions-setup").textContent, /restart needed/);
 });

@@ -9,6 +9,41 @@ import aiohttp
 from .telemetry import SourceError, client_key, number, object_data, safe_text
 
 
+def catalog_failure(error):
+    """Return only known local diagnostics, never raw API bodies or exception URLs."""
+    if isinstance(error, SourceError):
+        status = re.match(r"HTTP ([0-9]{3})(?:;|$)", str(error))
+        if status:
+            code = "http_" + status[1]
+            messages = {"400": "Query rejected; check Network API compatibility",
+                        "401": "API key authentication rejected",
+                        "403": "API key lacks catalog permission",
+                        "404": "Catalog endpoint unavailable on this Network version",
+                        "414": "Catalog query exceeds the controller URL limit",
+                        "429": "Controller rate limit; retry later"}
+            return code, messages.get(status[1], "Controller returned HTTP " + status[1])
+        known = (("pagination", "pagination_invalid", "Catalog pagination is unsupported or incomplete"),
+                 ("filter", "filter_ignored", "Controller ignored the exact ID filter"),
+                 ("duplicate ID", "identity_invalid", "Catalog IDs are unexpected or duplicated"),
+                 ("eight-page", "page_limit", "Catalog exceeds the bounded page limit"),
+                 ("2 MiB", "response_limit", "Catalog exceeds the response size limit"),
+                 ("JSON", "invalid_json", "Catalog did not return valid JSON"),
+                 ("shape", "schema_invalid", "Catalog response schema is unsupported"))
+        for needle, code, message in known:
+            if needle in str(error):
+                return code, message
+        return "schema_invalid", "Catalog response could not be validated"
+    if isinstance(error, TimeoutError):
+        return "timeout", "Catalog request timed out"
+    if isinstance(error, aiohttp.ServerFingerprintMismatch):
+        return "tls_pin", "Certificate fingerprint mismatch"
+    if isinstance(error, (aiohttp.ClientConnectorCertificateError, aiohttp.ClientSSLError)):
+        return "tls_certificate", "Certificate verification failed"
+    if isinstance(error, aiohttp.ClientError):
+        return "connection", "Catalog connection failed"
+    return "schema_invalid", "Catalog response schema is unsupported"
+
+
 class Activity:
     def __init__(self, telemetry):
         self.telemetry = telemetry
@@ -95,7 +130,8 @@ class Activity:
             tick = time.monotonic()
             self.cache = {k: v for k, v in self.cache.items() if tick - v["created"] < 60}
             cached = self.cache.get((key, seconds))
-            if cached and cached["identity"] == identity and tick - cached["created"] < 30:
+            if (cached and cached["identity"] == identity and tick - cached["created"] < 30 and
+                    not cached["data"]["catalog_error"]):
                 return cached["data"]
             mac = identity[0]
             start = now - seconds
@@ -142,19 +178,32 @@ class Activity:
                         raise SourceError("Controller returned an invalid activity measurement")
                     item[target] = value
                 applications.append(item)
-            catalog_error = ("API key not configured; application/category IDs are shown"
-                             if applications and not self.telemetry.config.unifi_api_key else None)
+            identifiers = (
+                {r["catalog_id"] for r in applications if not r["unidentified"]},
+                {r["category_id"] for r in applications if r["category_id"] != 255})
             catalogs = await asyncio.gather(
-                self.names("applications", {r["catalog_id"] for r in applications if not r["unidentified"]}),
-                self.names("categories", {r["category_id"] for r in applications if r["category_id"] != 255}),
+                self.names("applications", identifiers[0]),
+                self.names("categories", identifiers[1]),
                 return_exceptions=True)
             for result in catalogs:
                 if isinstance(result, BaseException) and not isinstance(
                         result, (SourceError, aiohttp.ClientError, TimeoutError, ValueError, TypeError)):
                     raise result
             app_names, category_names = [r if isinstance(r, dict) else {} for r in catalogs]
-            if any(isinstance(r, Exception) for r in catalogs):
-                catalog_error = "Name catalogs unavailable; numeric IDs are shown, not guessed labels"
+            diagnostics = {}
+            for kind, requested, result in zip(("applications", "categories"), identifiers, catalogs):
+                diagnostic = {"requested": len(requested), "matched": len(result) if isinstance(result, dict) else 0}
+                if isinstance(result, Exception):
+                    code, message = catalog_failure(result)
+                    diagnostic.update(status="error", code=code, message=message)
+                elif requested and not self.telemetry.config.unifi_api_key:
+                    diagnostic.update(status="not_configured", code="api_key_missing",
+                                      message="API key not configured")
+                else:
+                    diagnostic.update(status="ready" if requested else "not_needed", code=None, message=None)
+                diagnostics[kind] = diagnostic
+            errors = [kind.capitalize() + ": " + d["message"] for kind, d in diagnostics.items() if d["message"]]
+            catalog_error = "; ".join(errors) + "; numeric IDs retained" if errors else None
             for item in applications:
                 item["application"] = app_names.get(item["catalog_id"])
                 item["category"] = category_names.get(item["category_id"])
@@ -163,6 +212,7 @@ class Activity:
             data = {
                 "from": start, "to": now, "fetched": time.time(), "applications": applications,
                 "catalog_error": catalog_error,
+                "catalogs": diagnostics,
                 "status": "reported" if applications else "no_visible_activity",
                 "scope": "UniFi controller-classified traffic for this MAC in the requested window. "
                          "The API does not provide complete destination flows or a verified WAN-only scope.",

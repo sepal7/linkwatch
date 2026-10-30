@@ -32,7 +32,7 @@ def window(request: web.Request, default_hours=24) -> tuple[float, float]:
 
 
 def create_app(monitor: Monitor, *, development=False,
-               telemetry: Telemetry | None = None) -> web.Application:
+               telemetry: Telemetry | None = None, options_path: Path | None = None) -> web.Application:
     @web.middleware
     async def ingress(request, handler):
         peer = request.transport.get_extra_info("peername") if request.transport else None
@@ -198,7 +198,34 @@ def create_app(monitor: Monitor, *, development=False,
     async def control_options(request):
         enabled = bool(dns_actions and monitor.config.pihole_actions_enabled)
         router_enabled = bool(router_actions and monitor.config.unifi_controls_enabled)
+        config = monitor.config
+        saved = "unavailable"
+        if options_path is not None:
+            try:
+                options = json.loads(options_path.read_text(encoding="utf-8"))
+                flag = options.get("pihole_actions_enabled", False)
+                groups = options.get("pihole_action_group_ids", [])
+                if (type(flag) is not bool or not isinstance(groups, list) or len(groups) > 8 or
+                        any(type(group) is not int or not 1 <= group <= 2147483647 for group in groups) or
+                        len(groups) != len(set(groups))):
+                    saved = "invalid"
+                else:
+                    saved = ("match" if flag == config.pihole_actions_enabled and
+                             groups == config.pihole_action_group_ids else "different")
+            except (OSError, ValueError, AttributeError):
+                saved = "unavailable"
+        reason = ("ready" if enabled else "disabled")
+        if not telemetry:
+            reason = "collector_unavailable"
+        elif not config.pihole_url or not config.pihole_password:
+            reason = "connection_missing"
+        elif not config.pihole_action_group_ids:
+            reason = "groups_missing"
         return web.json_response({"dns_enabled": enabled,
+                                  "controls_schema": 2,
+                                  "dns": {"enabled": enabled, "reason": reason,
+                                          "group_ids": config.pihole_action_group_ids,
+                                          "saved_settings": saved},
                                   "router_enabled": router_enabled,
                                   "router_targets": router_actions.targets() if router_enabled else [],
                                   "csrf": control_csrf if enabled or router_enabled else None})

@@ -116,7 +116,7 @@ No automatic alternate-account or insecure-login fallback is attempted.
 
 Set **`unifi_activity_enabled: true`**, save and restart. In **Devices & activity**,
 open a device, select a router window (30 minutes, 1 hour or 24 hours), then
-choose **Load router traffic & activity**. This uses the existing dedicated
+choose **Load traffic**. This uses the existing dedicated
 local **read-only** username/password, not a new write account. It is off by
 default. Existing DNS detail stays separate and loads with its own button.
 No new periodic per-device polling is introduced.
@@ -148,6 +148,13 @@ It fetches exact filtered IDs from your controller, follows bounded pagination
 (eight pages maximum), and rejects unexpected IDs or incomplete responses.
 It does not ship a stale third-party name database or guess labels from DNS.
 The `65535` application and `255` category sentinel records stay unidentified.
+
+If measured bytes have no named services, the dashboard shows a compact total,
+not an empty service table. Open **Why names are unavailable** / **Service name
+status** for separate service/category diagnostics (HTTP status, permission,
+query compatibility, timeout or schema validation). **Retry names & traffic**
+does not reuse a failed catalog snapshot. These diagnostics contain no raw
+router responses or client data; exact names are never guessed.
 Missing exact matches stay unresolved. Without the key or a usable catalog,
 numeric IDs remain in technical evidence rather than invented labels.
 Classification can still be incomplete, delayed or wrong.
@@ -291,7 +298,8 @@ or a whole-application block.
    groups**. Do not select Default (ID 0). Linkwatch cannot know which group
    contains only children; review the group's members yourself.
 2. In HA app Configuration set `pihole_action_group_ids` to those nonzero IDs
-   (maximum eight), then set `pihole_actions_enabled: true`, Save and Restart.
+   (maximum eight, as a YAML list such as `[2]`), then set
+   `pihole_actions_enabled: true`, Save and Restart.
    Empty, duplicate or Default IDs are rejected; there is no fallback.
 3. This release requires an **existing explicit Pi-hole client entry for the
    device's current exact IP**, with membership in **every configured group**.
@@ -303,6 +311,14 @@ or a whole-application block.
    **Deny…**. Review the exact normalized domain, current group
    names/IDs and **all-group-member impact**, including siblings. Confirm within
    60 seconds. Changing/closing the device cancels the visible confirmation.
+
+Allow/Deny is visible but disabled when the running app has actions off or
+control status cannot be read. **Refresh controls** fetches effective status
+without changing settings. **DNS control settings** shows the running flag and
+group IDs, plus a comparison with the saved DNS flag/list. A restart is requested
+only when saved settings are provably different; unreadable settings remain
+unknown. Reload the dashboard after an app update. This status is not a
+membership proof: the selected-client/group checks still run at each preview.
 
 Existing API password/session and TLS verification/pinning are reused. The
 Pi-hole application password supports domain-list management without enabling

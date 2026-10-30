@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 import aiohttp
 from aiohttp.test_utils import TestClient, TestServer
 
-from network_monitor.app.activity import Activity
+from network_monitor.app.activity import Activity, catalog_failure
 from network_monitor.app.alerts import Alerts
 from network_monitor.app.config import Config
 from network_monitor.app.service import Monitor
@@ -231,6 +231,43 @@ class ActivityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["applications"][0]["application"], "Exact service")
         self.assertIsNone(result["applications"][0]["category"])
         self.assertIsNotNone(result["catalog_error"])
+        self.assertEqual(result["catalogs"]["categories"]["code"], "http_403")
+        self.assertEqual(result["catalogs"]["applications"]["matched"], 1)
+
+    async def test_catalog_errors_are_specific_sanitized_and_immediately_retryable(self):
+        self.telemetry.legacy_request.return_value = report(rows=[
+            {"application": 190, "category": 13, "total_bytes": 66100000}])
+        async def labels(session, method, url, **kwargs):
+            if url.endswith("/applications"):
+                raise SourceError("HTTP 400; private raw response must not be shown")
+            raise TimeoutError("private endpoint must not be shown")
+        self.telemetry.request.side_effect = labels
+        result = await self.activity.snapshot(KEY, 1800)
+        self.assertEqual(result["applications"][0]["total_bytes"], 66100000)
+        self.assertIsNone(result["applications"][0]["application"])
+        self.assertEqual(result["catalogs"]["applications"]["code"], "http_400")
+        self.assertEqual(result["catalogs"]["categories"]["code"], "timeout")
+        self.assertNotIn("private raw response", json.dumps(result))
+        self.assertNotIn("private endpoint", json.dumps(result))
+        self.telemetry.request.side_effect = [
+            catalog([{"id": (13 << 16) + 190, "name": "Exact example service"}]),
+            catalog([{"id": 13, "name": "Web services"}])]
+        result = await self.activity.snapshot(KEY, 1800)
+        self.assertEqual(result["applications"][0]["application"], "Exact example service")
+        self.assertIsNone(result["catalog_error"])
+        self.assertEqual(self.telemetry.legacy_request.await_count, 2)
+
+    def test_catalog_failure_never_exposes_unknown_exception_text(self):
+        for error, code in ((SourceError("HTTP 401"), "http_401"), (SourceError("HTTP 403"), "http_403"),
+                            (SourceError("HTTP 404"), "http_404"), (SourceError("HTTP 414"), "http_414"),
+                            (SourceError("Name catalog pagination is unsupported"), "pagination_invalid"),
+                            (SourceError("Name catalog exceeds the eight-page safety limit"), "page_limit"),
+                            (aiohttp.ClientConnectionError("private"), "connection"),
+                            (ValueError("private"), "schema_invalid")):
+            with self.subTest(code=code):
+                actual, message = catalog_failure(error)
+                self.assertEqual(actual, code)
+                self.assertNotIn("private", message)
 
     async def test_identity_change_during_read_rejects_result(self):
         async def changed(*args, **kwargs):

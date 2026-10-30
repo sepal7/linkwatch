@@ -75,7 +75,7 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
       <p class="subtle" id="traffic-caption">Optional telemetry is not configured. Connection monitoring runs independently.</p>
       <svg id="traffic-chart" viewBox="0 0 960 150" role="img" aria-label="Download and upload in the selected period"></svg>
       <p class="subtle" id="traffic-history-label"></p>
-      <p class="subtle">Download: blue · Upload: green · Actual traffic, not available speed. Gaps mean no telemetry.</p>
+      <p class="subtle">Download: blue · Upload: green · Gaps: unobserved</p>
     </section>
     <details class="panel" id="probe-details"><summary>Connection details <span id="cadence" class="subtle"></span></summary>
       <p id="status-detail" class="subtle">Waiting for probe evidence.</p>
@@ -88,60 +88,54 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
     </section>
   </section>
   <section id="view-devices" aria-labelledby="devices-title" hidden>
-      <div class="page-heading"><h2 id="devices-title" tabindex="-1">Device activity</h2><p class="subtle">One device, two sources of evidence. Compare router-classified applications with DNS decisions, without treating background traffic as screen time.</p></div>
+      <div class="page-heading"><h2 id="devices-title" tabindex="-1">Device activity</h2></div>
       <section class="panel" id="devices-setup" hidden>
         <h3>Connect your controller to see devices</h3>
-        <p>Device inventory currently comes from UniFi, not a LAN scan or Home Assistant sensor discovery. In Home Assistant, open Settings → Apps → Linkwatch → Configuration, enter <code>unifi_url</code> and <code>unifi_api_key</code>, then save and restart Linkwatch.</p>
-        <p class="subtle">Create the key in UniFi Network → Integrations. For traffic and signal details, optionally configure a dedicated local read-only account. Keep credentials in app Configuration, never in chat or GitHub.</p>
+        <p>Set <code>unifi_url</code> and <code>unifi_api_key</code> in HA app Configuration.</p>
         <button data-go="sources">See source setup</button>
       </section>
       <label class="device-search">Find a device <input id="device-search" type="search" placeholder="Name, IP or connection" autocomplete="off"></label>
       <p id="devices-status" class="subtle" role="status">Loading optional inventory…</p>
       <section id="router-recovery" class="panel" hidden>
         <h3>Configured router-control targets</h3>
-        <p class="subtle">A blocked device may disappear from connected inventory. Select its explicitly configured MAC here to open controls, including after a Linkwatch restart. No action runs automatically.</p>
+        <p class="subtle">Reopen a configured MAC even when it is absent from inventory.</p>
         <div class="actions"><label>Device MAC <select id="router-target"></select></label><button id="router-target-open">Open device controls</button></div>
       </section>
       <section class="panel" id="client-detail" aria-labelledby="client-title" hidden>
         <div class="section-heading"><h3 id="client-title" tabindex="-1">Device details</h3><div class="actions"><button id="client-refresh">Refresh details</button><button id="client-close">Close</button></div></div>
         <p id="client-evidence-status" class="subtle" role="status"></p>
         <section class="device-evidence" aria-labelledby="activity-title">
-          <div class="section-heading"><h3 id="activity-title">Services used by this device</h3><label>Window <select id="activity-window"><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="86400">24 hours</option></select></label></div>
-          <p class="subtle">Recognized services ranked by traffic, not time spent. Downloads and background connections can appear without someone actively using a service.</p>
-          <button id="client-activity">Load router traffic &amp; activity</button>
-          <p id="client-activity-note" class="subtle" role="status">Loads only on request. Enable unifi_activity_enabled in app Configuration; the local read-only UniFi account is required.</p>
+          <div class="section-heading"><h3 id="activity-title">Router traffic</h3><label>Window <select id="activity-window"><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="86400">24 hours</option></select></label></div>
+          <button id="client-activity">Load traffic</button>
+          <p id="client-activity-note" class="subtle" role="status">Not loaded</p>
           <div id="client-activity-results" hidden>
             <p id="activity-summary"></p>
-            <p id="activity-coverage" class="subtle"></p>
-            <div class="table-scroll" tabindex="0" role="region" aria-label="Recognized services ranked by traffic"><table class="service-traffic"><thead><tr><th>Recognized service</th><th>Traffic</th><th aria-label="Share of all reported bytes">Share</th></tr></thead><tbody id="client-applications"></tbody></table></div>
-            <p class="subtle">This is not a screen-time report or complete internet usage. Protocol and unidentified traffic remain included in the coverage totals and technical evidence below.</p>
+            <div id="service-table" class="table-scroll" tabindex="0" role="region" aria-label="Recognized services ranked by traffic" hidden><table class="service-traffic"><thead><tr><th>Service</th><th>Traffic</th><th aria-label="Share of all reported bytes">Share</th></tr></thead><tbody id="client-applications"></tbody></table></div>
+            <details id="catalog-details"><summary id="catalog-summary">Service name status</summary><p id="catalog-status" class="subtle"></p><button id="catalog-retry">Retry names &amp; traffic</button><button class="text-button" data-go="sources">Source setup</button></details>
             <details><summary>All traffic &amp; technical evidence</summary>
-              <p class="subtle">Every returned row, including protocols and unresolved names. Category text is an unverified router classification, not proof of content viewed or a rule violation. No category triggers an accusation or alert.</p>
+              <p id="activity-coverage" class="subtle"></p>
               <div class="table-scroll" tabindex="0" role="region" aria-label="All router traffic measurements"><table><thead><tr><th>Router label / IDs</th><th>Reported bytes</th><th>Received / transmitted</th><th>Router activity estimate</th></tr></thead><tbody id="client-traffic-technical"></tbody></table></div>
-              <p class="subtle">Received/transmitted are the API's counters, not verified internet-only download/upload. Decimal units: 1 MB = 1,000,000 bytes. Activity estimates can overlap across rows and include background traffic; they cannot be summed into time played or watched.</p>
             </details>
-            <details><summary>Evidence and identity limits</summary><p id="activity-limits" class="subtle"></p></details>
           </div>
         </section>
         <section class="device-evidence" aria-labelledby="dns-title">
           <h3 id="dns-title">DNS activity</h3>
-          <p class="subtle">Pi-hole decisions, alongside router evidence. A permitted DNS answer is not proof of a page visit; a blocked domain is not an internet outage.</p>
-          <button id="client-dns">Load recent DNS activity</button><p id="client-dns-note" role="status" class="subtle">DNS is loaded only on request, not continuously copied.</p>
+          <button id="client-dns">Load recent DNS activity</button><p id="client-dns-note" role="status" class="subtle">Not loaded</p>
           <label class="device-search">Search loaded DNS <input id="client-dns-search" type="search" placeholder="Domain, type, outcome" autocomplete="off" disabled></label>
-          <p id="client-dns-count" class="subtle" role="status">Load recent DNS activity to search up to 100 returned queries. This does not search the full DNS history.</p>
-          <p id="dns-actions-setup" class="subtle">To preview exact-domain DNS rules, configure existing non-Default kids groups and enable pihole_actions_enabled in app Configuration. The feature starts disabled and preserves group memberships.</p>
+          <p id="client-dns-count" class="subtle" role="status"></p>
+          <div class="section-heading"><p id="dns-actions-setup" class="subtle" role="status">Checking DNS controls…</p><button id="control-refresh" class="text-button">Refresh controls</button></div>
+          <details><summary>DNS control settings</summary><p id="dns-control-diagnostic" class="subtle"></p><p class="subtle">Set <code>pihole_actions_enabled: true</code> and a list of existing kids-group IDs in <code>pihole_action_group_ids</code>. Rules affect every device in those groups. Client membership and existing rules are checked before confirmation.</p></details>
           <section id="dns-action-confirmation" class="device-evidence" aria-labelledby="dns-action-title" hidden>
             <h4 id="dns-action-title" tabindex="-1">Confirm DNS group rule</h4>
             <p id="dns-action-scope"></p><p id="dns-action-impact" class="subtle"></p>
             <div class="actions"><button id="dns-action-apply">Confirm exact-domain rule</button><button id="dns-action-cancel">Cancel</button></div>
           </section>
           <p id="dns-action-status" role="status" class="subtle"></p>
-          <div class="table-scroll" tabindex="0" role="region" aria-label="Recent DNS activity"><table><thead><tr><th>Time</th><th>Domain / type</th><th>DNS outcome</th><th>Reply</th></tr></thead><tbody id="client-queries"></tbody></table></div>
+          <div class="table-scroll" tabindex="0" role="region" aria-label="Recent DNS activity"><table class="dns-activity"><thead><tr><th>Time</th><th>Domain / type</th><th>DNS outcome</th><th>Reply</th><th>Actions</th></tr></thead><tbody id="client-queries"></tbody></table></div>
         </section>
         <section class="device-evidence" aria-labelledby="restrictions-title">
           <h3 id="restrictions-title" tabindex="-1">Network restrictions</h3>
-          <p>Router blocks, schedules and DNS group rules are separate restrictions. Traffic observations do not prove which restrictions currently apply.</p>
-          <p id="router-actions-setup" class="subtle">Manual router controls are off. Configure a separate control account, allowed client MACs and the Home Assistant host IP before enabling unifi_controls_enabled.</p>
+          <p id="router-actions-setup" class="subtle">Router controls off</p>
           <div id="router-action-buttons" class="actions" hidden><button id="router-block">Block network access…</button><button id="router-unblock">Unblock router block…</button></div>
           <section id="router-action-confirmation" class="device-evidence" aria-labelledby="router-action-title" hidden>
             <h4 id="router-action-title" tabindex="-1">Confirm manual router action</h4>
@@ -151,28 +145,31 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
           </section>
           <p id="router-action-status" class="subtle" role="status" aria-live="polite"></p>
           <a id="unifi-console-link" href="unifi-console" target="_blank" rel="noopener noreferrer" hidden>Manage restrictions in UniFi ↗</a>
-          <p class="subtle">A network block may affect LAN access too. Unblock clears the shared router flag, including blocks set outside Linkwatch, without removing separate firewall, schedule or DNS rules; Linkwatch never unblocks automatically.</p>
         </section>
         <details class="device-evidence"><summary>Connection details &amp; shared incidents</summary>
         <div id="client-body"></div>
         </details>
+        <details class="device-evidence"><summary>How to read this activity</summary>
+          <p class="subtle">Traffic and DNS are evidence, not screen time or proof of viewed content. Router byte counters can include LAN/background traffic; duration estimates overlap. Categories are unverified classifications, not accusations. Decimal units: 1 MB = 1,000,000 bytes.</p>
+          <p class="subtle">DNS is limited to 100 queries within 30 minutes and this device's continuously observed unique IP binding. Search filters only the loaded snapshot. Cached answers, alternate/encrypted DNS and shared resolvers limit visibility.</p>
+          <p class="subtle">MACs identify interfaces, not people. Randomized MAC changes create separate devices. Missing/stale measurements are unknown, not zero. Firewall, schedule and DNS restrictions remain separate.</p>
+          <p id="activity-limits" class="subtle"></p>
+        </details>
       </section>
       <div class="panel table-scroll" tabindex="0" role="region" aria-label="Network devices"><table><thead><tr><th>Device</th><th>Connection</th><th>Controller RX / TX</th><th>Evidence</th></tr></thead><tbody id="device-list"></tbody></table></div>
-      <p class="subtle">Client RX/TX is controller-reported traffic and may include LAN transfers. It is not necessarily internet-only download/upload. Missing metrics are not zero.</p>
     </section>
     <section id="view-sources" aria-labelledby="sources-title" hidden>
-      <div class="page-heading"><h2 id="sources-title" tabindex="-1">Data sources</h2><p class="subtle">Optional local integrations. A source outage never stops Linkwatch's connectivity checks.</p></div>
+      <div class="page-heading"><h2 id="sources-title" tabindex="-1">Data sources</h2></div>
       <p id="telemetry-error" class="notice" role="alert" hidden></p>
       <div id="source-list"></div>
       <section class="panel">
         <div class="section-heading"><h3>Connect what you have</h3><button id="discover-sensors">Discover Home Assistant sensors</button></div>
-        <p class="subtle">No particular router, DNS server or internet provider is required. Start with connection monitoring, then add only the sources you want.</p>
-        <p id="discovery-status" class="subtle" role="status">To enable this button: Settings → Apps → Linkwatch → Configuration → set ha_discovery_enabled to true → Save → Restart. Discovery finds existing Home Assistant sensors only; it does not find every network device or configure connections.</p>
+        <p id="discovery-status" class="subtle" role="status">Enable ha_discovery_enabled in HA app Configuration to find existing sensor candidates.</p>
         <div id="discovery-results"></div>
         <details><summary>Available connectors</summary><p class="subtle">Any internet provider: map existing Home Assistant WAN rate sensors in internet_entities. UniFi: optional client inventory and legacy statistics. Pi-hole v6: optional DNS summary and query evidence. Starlink: optional Home Assistant dish sensors. Configure only the hardware you own; omitted connectors stay off.</p></details>
       </section>
       <section class="panel"><h3>Network equipment</h3><div id="infrastructure"><p class="subtle">Connect the official UniFi API to see available equipment statistics.</p></div></section>
-      <details class="panel" open><summary>Connection setup</summary>
+      <details class="panel"><summary>Connection setup</summary>
         <p>Leave this dashboard and open Home Assistant → Settings → Apps → Linkwatch → Configuration. Enter only the connections you want, then Save and Restart Linkwatch. These dashboard panels show results; they do not save credentials.</p>
         <p class="subtle">All connections start off. No particular hardware is required. Keep secrets in app Configuration, never in chat or GitHub.</p>
         <h3>Devices and equipment · UniFi</h3>
@@ -181,7 +178,7 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
         <p class="subtle">Optional application activity: enable <code>unifi_activity_enabled</code> to allow on-demand application reads with that read-only account. Enable Traffic Identification yourself in UniFi if desired; Linkwatch does not change it. The API key optionally supplies application/category names; otherwise IDs are shown. Snapshots stay in memory briefly, never in Linkwatch's database.</p>
         <h3>DNS activity · Pi-hole v6</h3>
         <p>Set <code>pihole_url</code> to the local HTTP/HTTPS origin (no /admin or /api path), and <code>pihole_password</code> to an application password from Pi-hole settings. This adds DNS totals; per-device queries also need a current, uniquely matched UniFi client IP.</p>
-        <p class="subtle">Prefer HTTPS; HTTP credentials and DNS data travel unencrypted on your LAN. No maintenance, blocking, update or reboot commands are sent.</p>
+        <p class="subtle">Prefer HTTPS. Domain actions are separately enabled; monitoring does not alter settings or maintenance jobs.</p>
         <h3>Internet traffic · Home Assistant sensors</h3>
         <p>Add your router/provider integration in Home Assistant first. Enable <code>ha_discovery_enabled</code>, save and restart, then use discovery above to find candidate entity IDs. Map your whole-WAN rate sensors in <code>internet_entities</code>, for example <code>download=sensor.example_wan_download</code> and <code>upload=sensor.example_wan_upload</code>. Replace these examples with your own IDs, then save and restart again.</p>
         <h3>Dish health · Starlink (optional)</h3>
@@ -190,26 +187,26 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
       </details>
     </section>
   <section id="view-trends" aria-labelledby="trends-title" hidden>
-    <div class="page-heading"><h2 id="trends-title" tabindex="-1">Connection trends</h2><p class="subtle">Measured from retained history. Unobserved time is never counted as online.</p></div>
+    <div class="page-heading"><h2 id="trends-title" tabindex="-1">Connection trends</h2></div>
     <dl id="trend-metrics" class="trend-metrics"></dl>
     <section class="panel"><div class="section-heading"><h3>Previous period</h3><span id="comparison-label" class="subtle"></span></div><p id="comparison" class="subtle">Loading comparison…</p></section>
     <section class="panel"><div class="section-heading"><h3 id="period-title">Over time</h3><span class="subtle">UTC boundaries · local labels</span></div>
       <div class="table-scroll" tabindex="0" role="region" aria-label="Hourly or daily network trends"><table><thead><tr><th>Period start</th><th>Offline spans</th><th>Downtime</th><th>Degraded</th><th>Coverage</th><th>Mean / p95 TCP</th></tr></thead><tbody id="periods"></tbody></table></div>
     </section>
-    <p class="subtle">p95 is the 95th percentile of each sample's mean successful external TCP time, not packet loss. A span crossing a period boundary appears in both rows.</p>
+    <details><summary>Trend methodology</summary><p class="subtle">Only observed time counts. p95 is the 95th percentile of each sample's mean successful external TCP time, not packet loss. A span crossing a period boundary appears in both rows.</p></details>
   </section>
   <section id="view-incidents" aria-labelledby="incidents-title" hidden>
-    <div class="page-heading"><h2 id="incidents-title" tabindex="-1">Incidents &amp; gaps</h2><p class="subtle">Raw observations, including brief failures that did not trigger a sound.</p></div>
+    <div class="page-heading"><h2 id="incidents-title" tabindex="-1">Incidents &amp; gaps</h2></div>
     <div class="section-heading"><label>Show <select id="incident-filter"><option value="all">All non-online states</option><option value="offline">Interruptions</option><option value="degraded">Degraded</option><option value="unknown">Unknown &amp; gaps</option></select></label><div class="exports"><a id="export-intervals" href="api/export.csv">Intervals CSV</a><a id="export-samples" href="api/export.csv?kind=samples">Samples CSV</a></div></div>
     <section class="panel" id="incident-detail" aria-labelledby="detail-title" hidden>
       <div class="section-heading"><h3 id="detail-title" tabindex="-1">Incident details</h3><div class="actions"><button id="reload-incident" class="text-button">Refresh details</button><button id="close-incident" class="text-button">Close details</button></div></div><div id="detail-body"></div>
     </section>
     <div class="panel incident-list" id="all-incidents"><p class="subtle">Loading history…</p></div>
     <p id="incident-note" class="subtle"></p>
-    <p class="subtle">Durations estimate time between observations. Gaps split incidents; this app cannot know what happened while monitoring stopped.</p>
+    <details><summary>Incident methodology</summary><p class="subtle">Includes brief failures below the alert threshold. Durations estimate time between observations. Monitoring gaps split incidents and remain unknown.</p></details>
   </section>
   <section id="view-settings" aria-labelledby="settings-title" hidden>
-    <div class="page-heading"><h2 id="settings-title" tabindex="-1">Settings &amp; logs</h2><p class="subtle">Monitoring configuration is managed on the Home Assistant app's Configuration tab.</p></div>
+    <div class="page-heading"><h2 id="settings-title" tabindex="-1">Settings &amp; logs</h2><p class="subtle">Configuration: Home Assistant → Apps → Linkwatch</p></div>
     <section class="panel">
       <div class="section-heading"><h3>Alerts &amp; notifications</h3><div class="actions"><button id="mute" disabled>Mute alerts</button><button id="test-sound" disabled>Test alerts</button></div></div>
       <p id="sound-status">Loading configuration…</p><p id="sound-error" class="notice" role="alert" hidden></p><p id="action-result" role="status"></p>
@@ -220,8 +217,7 @@ FORM: UniFi/Starlink-inspired operational overview; details live on dedicated vi
         <p class="subtle">For phone notifications, enter your Companion app's <code>notify.mobile_app_…</code> action in <code>phone_notify_service</code>, then enable alerts. Set <code>sound_output: none</code> for phone-only alerts. Normal push can fail during a home internet outage; Companion Local Push can work on the same functioning LAN when configured on the phone. Dashboard mute covers all outputs.</p>
       </details>
     </section>
-    <section class="panel"><h3>Device evidence</h3><p class="subtle">Optional UniFi and Pi-hole sources add observations in Devices. Client internet quality is not directly probed; a DNS block, weak signal or list disappearance does not establish an internet outage.</p><button class="text-button" data-go="devices">View devices →</button></section>
-    <section class="panel"><h3>History &amp; sampling</h3><p id="retention" class="subtle">Loading retention…</p><p class="subtle">Monitoring gaps, unknown evidence and stale samples are not uptime. Each chart column aggregates observations; click the chart for details. Exports follow the selected period.</p></section>
+    <section class="panel"><h3>History &amp; sampling</h3><p id="retention" class="subtle">Loading retention…</p><details><summary>Measurement limits</summary><p class="subtle">Monitoring gaps and stale samples are not uptime. Chart columns aggregate observations; inspect the chart for detail. Exports follow the selected period. Checks run from Home Assistant, not each client.</p></details></section>
     <details class="panel" id="event-details"><summary>Event log <span class="subtle">Latest 100 in selected period</span></summary><ol id="events" class="event-log"><li>No events loaded.</li></ol></details>
   </section>
   <footer><span>Linkwatch · Live internet health &amp; alerts</span><span id="footer-note">Waiting for fresh evidence</span></footer>

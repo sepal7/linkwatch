@@ -3,6 +3,7 @@ import json
 import tempfile
 import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -284,9 +285,68 @@ class DNSActionTests(unittest.IsolatedAsyncioTestCase):
         monitor = Monitor(Config(), self.store, Alerts(Config(), self.store, "", object()))
         async with TestClient(TestServer(create_app(monitor, development=True))) as client:
             options = await (await client.get("/api/controls")).json()
-            self.assertEqual(options, {"dns_enabled": False, "router_enabled": False,
-                                       "router_targets": [], "csrf": None})
+            self.assertFalse(options["dns_enabled"])
+            self.assertFalse(options["router_enabled"])
+            self.assertIsNone(options["csrf"])
+            self.assertEqual(options["dns"]["saved_settings"], "unavailable")
             self.assertNotIn("pihole_password", json.dumps(options))
+
+    async def test_effective_group_two_and_provable_saved_restart_status_without_secrets(self):
+        config = replace(self.config, pihole_action_group_ids=[2])
+        self.telemetry.config = config
+        monitor = Monitor(config, self.store, Alerts(config, self.store, "", object()))
+        path = Path(self.temp.name) / "options.json"
+        def save(flag, groups):
+            path.write_text(json.dumps({"pihole_actions_enabled": flag, "pihole_action_group_ids": groups,
+                                         "pihole_password": "private-not-returned"}), encoding="utf-8")
+        save(True, [2])
+        async with TestClient(TestServer(create_app(
+                monitor, development=True, telemetry=self.telemetry, options_path=path))) as client:
+            for flag, groups, status in ((True, [2], "match"), (False, [2], "different"),
+                                         (True, [3], "different"), (True, 2, "invalid"),
+                                         ("true", [2], "invalid")):
+                save(flag, groups)
+                response = await client.get("/api/controls")
+                options = await response.json()
+                self.assertEqual(options["controls_schema"], 2)
+                self.assertTrue(options["dns_enabled"])
+                self.assertEqual(options["dns"]["group_ids"], [2])
+                self.assertEqual(options["dns"]["saved_settings"], status)
+                self.assertNotIn("private-not-returned", json.dumps(options))
+            path.unlink()
+            options = await (await client.get("/api/controls")).json()
+            self.assertEqual(options["dns"]["saved_settings"], "unavailable")
+        self.telemetry.pihole_get.assert_not_awaited()
+        self.telemetry.pihole_request.assert_not_awaited()
+
+    async def test_running_disabled_saved_enabled_is_reported_not_implicitly_enabled(self):
+        config = replace(self.config, pihole_actions_enabled=False, pihole_action_group_ids=[2])
+        self.telemetry.config = config
+        path = Path(self.temp.name) / "options.json"
+        path.write_text('{"pihole_actions_enabled":true,"pihole_action_group_ids":[2]}', encoding="utf-8")
+        monitor = Monitor(config, self.store, Alerts(config, self.store, "", object()))
+        async with TestClient(TestServer(create_app(
+                monitor, development=True, telemetry=self.telemetry, options_path=path))) as client:
+            options = await (await client.get("/api/controls")).json()
+            self.assertFalse(options["dns_enabled"])
+            self.assertEqual(options["dns"]["reason"], "disabled")
+            self.assertEqual(options["dns"]["saved_settings"], "different")
+            self.assertIsNone(options["csrf"])
+        with self.assertRaisesRegex(SourceError, "disabled"):
+            await self.actions.prepare(KEY, "example.com", "allow")
+
+    def test_group_two_loads_from_saved_options_without_coercing_scalars(self):
+        path = Path(self.temp.name) / "load-options.json"
+        options = {"pihole_url": "https://dns.example", "pihole_password": "synthetic",
+                   "pihole_actions_enabled": True, "pihole_action_group_ids": [2]}
+        path.write_text(json.dumps(options), encoding="utf-8")
+        loaded = Config.load(path)
+        self.assertTrue(loaded.pihole_actions_enabled)
+        self.assertEqual(loaded.pihole_action_group_ids, [2])
+        options["pihole_action_group_ids"] = 2
+        path.write_text(json.dumps(options), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            Config.load(path)
 
 
 if __name__ == "__main__":

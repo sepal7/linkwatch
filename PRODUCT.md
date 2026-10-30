@@ -65,6 +65,12 @@ The device view prioritizes exact controller-named services ranked by bytes,
 with named/protocol/unidentified coverage visible. Raw IDs, unverified category
 text and overlapping time estimates belong in expandable technical evidence.
 Names must match the category/application composite, not a local app ID alone.
+Primary views stay concise; detailed evidence/methodology is contextual.
+Nonzero unidentified traffic never becomes an empty named-service table.
+Catalog failures expose separate sanitized reasons, not guessed mappings.
+DNS controls refresh on device-open/tab-return and expose only effective flag,
+configured group IDs and a proven saved/running comparison. Saved settings do
+not dynamically enable actions; confirmation safeguards are unchanged.
 Separately enabled DNS actions can create exact allow/deny rules only for
 explicitly configured existing enabled non-Default kids groups, after a fresh
 group-wide impact preview and confirmation. Existing rules and memberships

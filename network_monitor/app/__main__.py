@@ -42,7 +42,7 @@ async def serve(args):
             alerts.error(time.time(), f"Cannot prepare local sound files: {exc}")
         monitor = Monitor(config, store, alerts)
         telemetry = Telemetry(config, store, os.environ.get("SUPERVISOR_TOKEN", ""))
-        app = create_app(monitor, development=args.development, telemetry=telemetry)
+        app = create_app(monitor, development=args.development, telemetry=telemetry, options_path=args.options)
         runner = web.AppRunner(app, access_log=None)
         await runner.setup()
         site = web.TCPSite(runner, "127.0.0.1" if args.development else "0.0.0.0", args.port)

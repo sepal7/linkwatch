@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.4.1
+
+- Refresh DNS control status when opening a device, returning to the tab or
+  choosing Refresh controls. Allow/Deny stays visible when disabled; compact
+  diagnostics distinguish running settings from saved DNS settings without
+  exposing connection secrets or silently enabling actions.
+- Hide empty service tables while retaining measured traffic and every raw row
+  in technical details. Separate catalog HTTP/auth/filter/schema/timeout errors
+  and retry failed name reads instead of reusing a failed snapshot.
+- Shorter primary views, contextual evidence help and mobile-friendly DNS rows.
+  Group-wide DNS and shared router-block confirmation warnings are unchanged.
+
 ## 1.4.0
 
 - Optional confirmed exact-domain allow/deny actions from loaded DNS rows,

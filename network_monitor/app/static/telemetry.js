@@ -2,7 +2,7 @@
 let telemetryData = null, selectedClient = null, clientRequest = 0;
 let activityRequest = 0;
 let loadedDNS = null;
-let controlOptions = null, dnsPlan = null, dnsActionRequest = 0, dnsActionBusy = false;
+let controlOptions = null, controlRequest = 0, controlError = "", dnsPlan = null, dnsActionRequest = 0, dnsActionBusy = false;
 let routerPlan = null, routerActionRequest = 0, routerActionBusy = false;
 const bytes = value => {
   if (!Number.isFinite(value)) return "Unavailable";
@@ -67,8 +67,8 @@ function renderDevices() {
     inventoryConfigured ? "No devices received yet. Check UniFi source status and errors under Sources." :
     "No controller connected. Follow the setup above to load devices.");
   $("devices-status").textContent = inventoryConfigured ?
-    `${telemetryData.clients.length} retained devices · telemetry target ${telemetryData.interval_seconds}s · details are snapshots` :
-    "Device inventory is not configured. Connection monitoring continues independently.";
+    `${telemetryData.clients.length} devices · refreshed every ${telemetryData.interval_seconds}s` :
+    "Connect UniFi in Sources to load devices.";
 }
 function renderSources(data) {
   telemetryData = data;
@@ -86,13 +86,11 @@ function renderSources(data) {
       if (lines.length) panel.append(text("p", `${source.stale ? "Last known (not current):\n" : ""}${lines.join("\n")}`, "subtle source-values"));
       if (source.data.unavailable_metrics?.length) panel.append(text("p", `Unavailable sensors: ${source.data.unavailable_metrics.join(", ")}`, "subtle"));
     }
-    if (name === "starlink") panel.append(text("p", "Restart or update pending is context, not proof that an outage was caused by an automatic update. Firmware can temporarily interrupt telemetry; monitoring continues.", "subtle"));
-    if (name === "pihole") panel.append(text("p", "Counts cover Pi-hole's retained summary, not the selected chart period. Existing maintenance jobs are not inspected or modified.", "subtle"));
     sources.append(panel);
   }
-  if (!sources.children.length) sources.append(text("p", "No optional sources connected. Basic connection monitoring is already working; connect additional sources below.", "subtle"));
+  if (!sources.children.length) sources.append(text("p", "No optional sources connected.", "subtle"));
   $("discover-sensors").disabled = !data.discovery_enabled;
-  $("traffic-panel").hidden = !Object.values(data.sources).some(s => s.enabled);
+  $("traffic-panel").hidden = !["legacy", "starlink", "internet", "pihole"].some(name => data.sources[name].enabled);
   const dish = data.sources.starlink, wan = data.sources.legacy, generic = data.sources.internet;
   const active = !generic.stale && Number.isFinite(generic.data?.download) && Number.isFinite(generic.data?.upload) ? generic :
     !dish.stale && Number.isFinite(dish.data?.download) && Number.isFinite(dish.data?.upload) ? dish :
@@ -100,7 +98,7 @@ function renderSources(data) {
   $("traffic-down").textContent = bps(active === wan ? active?.data.download_bps : active?.data.download);
   $("traffic-up").textContent = bps(active === wan ? active?.data.upload_bps : active?.data.upload);
   $("traffic-caption").textContent = active ? `${active === generic ? "Configured internet sensors" : active === dish ? "Starlink terminal" : "UniFi WAN counters"} · read ${formatTime(active.ts)} · actual traffic, not a speed test` :
-    "Current traffic unavailable. Map your internet sensors or configure supported router counters in Sources.";
+    "WAN rates unavailable · check Sources";
   const dns = data.sources.pihole;
   $("dns-summary").textContent = !dns.stale ? `${dns.data?.queries?.toLocaleString() ?? "—"} / ${dns.data?.blocked?.toLocaleString() ?? "—"}` : "Unavailable";
   const equipment = $("infrastructure"); equipment.replaceChildren();
@@ -118,27 +116,30 @@ async function openClient(key) {
   cancelDNSAction();
   cancelRouterAction();
   renderRouterControls();
+  loadControlOptions();
   $("client-detail").hidden = false; $("client-title").textContent = "Loading device…";
   $("client-evidence-status").textContent = "Loading controller evidence…";
   $("client-activity-results").hidden = true;
   $("client-applications").replaceChildren(); $("client-traffic-technical").replaceChildren();
   $("client-activity").disabled = true;
   $("client-activity-note").textContent = telemetryData?.activity_enabled ?
-    "Loads only on request; the selected window applies to router applications, not DNS." :
-    "Enable unifi_activity_enabled in app Configuration, save and restart to allow application reads with your local read-only UniFi account.";
+    "Not loaded" :
+    "Traffic off · enable unifi_activity_enabled in HA app Configuration";
+  $("client-activity").textContent = "Load traffic";
+  $("activity-limits").textContent = "";
   $("client-body").replaceChildren(); $("client-queries").replaceChildren();
   loadedDNS = null;
   $("client-dns-search").value = "";
   $("client-dns-search").disabled = true;
-  $("client-dns-count").textContent = "Load recent DNS activity to search up to 100 returned queries. This does not search the full DNS history.";
-  $("client-dns-note").textContent = "DNS loads only on request; queries are not browsing history.";
+  $("client-dns-count").textContent = "";
+  $("client-dns-note").textContent = "Not loaded";
   $("client-dns").disabled = true;
   try {
     const data = await api(`api/clients/${encodeURIComponent(key)}`);
     if (request !== clientRequest) return;
     const client = data.client;
     $("client-title").textContent = client.name;
-    $("client-evidence-status").textContent = `${client.stale ? "Stale controller inventory" : "Controller lists connected"} · ${client.ip || "IP unavailable"} · ${client.connection || "Unknown connection"} · details read ${formatTime(Date.now() / 1000)}`;
+    $("client-evidence-status").textContent = `${client.stale ? "Stale / not listed" : "Connected"} · ${client.ip || "IP unavailable"} · ${client.connection || "Unknown"} · ${formatTime(Date.now() / 1000)}`;
     const body = $("client-body"), grid = document.createElement("dl"); grid.className = "detail-grid";
     for (const [label, value] of [["IP", client.ip], ["MAC", client.mac], ["Connection", client.connection],
       ["Controller RX", client.stale ? "Unavailable" : bps(client.rx_bps)], ["Controller TX", client.stale ? "Unavailable" : bps(client.tx_bps)],
@@ -167,7 +168,7 @@ async function openClient(key) {
     $("client-dns").disabled = client.stale || !telemetryData?.sources.pihole.enabled;
     $("client-activity").disabled = !activityAvailable();
     if (telemetryData?.activity_enabled && !telemetryData.sources.legacy.enabled) {
-      $("client-activity-note").textContent = "Configure the dedicated local read-only UniFi username and password under Sources to load application evidence.";
+      $("client-activity-note").textContent = "Add read-only UniFi credentials in Sources";
     }
     $("client-title").focus({preventScroll: true});
   } catch (error) {
@@ -183,7 +184,8 @@ function activityAvailable() {
 }
 function renderActivity(data) {
   $("client-activity-results").hidden = false;
-  $("client-activity-note").textContent = `${formatTime(data.from)} – ${formatTime(data.to)} · fetched ${formatTime(data.fetched)}. Snapshot does not refresh automatically.`;
+  $("client-activity-note").textContent = `${formatTime(data.from)} – ${formatTime(data.to)} · read ${formatTime(data.fetched)}`;
+  $("client-activity").textContent = "Refresh traffic";
   const body = $("client-applications"); body.replaceChildren();
   const technical = $("client-traffic-technical"); technical.replaceChildren();
   const groups = {
@@ -221,27 +223,32 @@ function renderActivity(data) {
     const value = row.dataset.bytes === "" ? null : Number(row.dataset.bytes);
     row.append(text("td", complete && total > 0 && value !== null ? `${(value / total * 100).toFixed(1)}%` : "Unavailable"));
   }
+  $("service-table").hidden = groups.services.rows === 0;
+  const unavailable = data.catalogs?.applications?.status === "error" ||
+    data.catalogs?.applications?.status === "not_configured" || (!data.catalogs && !!data.catalog_error);
   $("activity-summary").textContent = applications.length ?
-    `${groups.services.rows} recognized service${groups.services.rows === 1 ? "" : "s"} · ${complete ? bytes(total) + " reported across all traffic" : "Some traffic totals unavailable"}.` :
-    "No visible traffic returned. This does not prove no use.";
+    `${complete ? bytes(total) + " traffic" : "Traffic totals incomplete"} · ${groups.services.rows ?
+      groups.services.rows + " named services" : unavailable ? "service names unavailable" : "services unidentified"}` :
+    "No traffic reported for this window";
   $("activity-coverage").textContent = Object.entries(groups).map(([key, group]) =>
     `${{services: "Named services", protocols: "Network protocols", unidentified: "Unidentified services"}[key]}: ${group.complete ? bytes(group.bytes) : bytes(group.bytes) + " known; incomplete"} (${group.rows} row${group.rows === 1 ? "" : "s"})`
   ).join(" · ");
-  if (!body.children.length) {
-    emptyRow(body, applications.length ?
-      "No recognizable services resolved for this window. See unidentified coverage and technical evidence; this is not evidence of inactivity." :
-      "No application evidence available. Check Traffic Identification and source status.", 3);
-  }
   if (!technical.children.length) emptyRow(technical, "No router traffic rows returned.");
+  const diagnostics = Object.entries(data.catalogs || {}).map(([kind, info]) =>
+    `${kind === "applications" ? "Services" : "Categories"}: ${info.message || `${info.matched}/${info.requested} exact names matched`}${info.code ? ` (${info.code})` : ""}`);
+  $("catalog-status").textContent = diagnostics.join(" · ") || data.catalog_error || "No catalog diagnostic available";
+  $("catalog-details").hidden = !applications.length;
+  $("catalog-details").open = false;
+  $("catalog-summary").textContent = unavailable ? "Why names are unavailable" : "Service name status";
   $("activity-limits").textContent = `${data.scope} ${data.warning} ${data.identity_note}${data.private_mac ? " This is a locally administered/private MAC." : ""}`;
-  if (data.catalog_error) $("client-activity-note").textContent += ` ${data.catalog_error}`;
 }
 async function loadClientActivity() {
   const key = selectedClient, client = clientRequest, request = ++activityRequest;
   const seconds = Number($("activity-window").value);
   $("client-activity").disabled = true;
   $("client-activity-results").hidden = true;
-  $("client-activity-note").textContent = "Reading this device's router-classified application snapshot…";
+  $("catalog-retry").disabled = true;
+  $("client-activity-note").textContent = "Loading traffic…";
   try {
     const data = await api(`api/clients/${encodeURIComponent(key)}/activity?seconds=${seconds}`, undefined, 25000);
     if (client !== clientRequest || request !== activityRequest) return;
@@ -251,6 +258,7 @@ async function loadClientActivity() {
   } finally {
     if (client === clientRequest && request === activityRequest) {
       $("client-activity").disabled = !activityAvailable();
+      $("catalog-retry").disabled = !activityAvailable();
     }
   }
 }
@@ -259,12 +267,12 @@ async function loadClientDNS() {
   loadedDNS = null;
   $("client-queries").replaceChildren();
   $("client-dns-search").disabled = true;
-  $("client-dns-count").textContent = "Loading bounded DNS snapshot…";
-  $("client-dns").disabled = true; $("client-dns-note").textContent = "Loading up to 100 recent DNS requests…";
+  $("client-dns-count").textContent = "";
+  $("client-dns").disabled = true; $("client-dns-note").textContent = "Loading DNS…";
   try {
     const data = await api(`api/clients/${encodeURIComponent(key)}/dns`);
     if (request !== clientRequest) return;
-    $("client-dns-note").textContent = `${data.matched_by} · since ${formatTime(data.from)} · fetched ${formatTime(data.fetched)}. ${data.warning}`;
+    $("client-dns-note").textContent = `Read ${formatTime(data.fetched)} · current IP binding`;
     loadedDNS = data;
     $("client-dns-search").disabled = false;
     renderClientDNS();
@@ -288,9 +296,8 @@ function renderRouterControls() {
   $("router-block").disabled = routerActionBusy;
   $("router-unblock").disabled = routerActionBusy;
   $("router-actions-setup").textContent = !enabled ?
-    "Manual router controls are off. Configure a separate control account, allowed client MACs and the Home Assistant host IP before enabling unifi_controls_enabled." :
-    !target ? "This MAC is not explicitly configured for controls. Add only intended client MACs in app Configuration; infrastructure is protected." :
-      `Controls target exact MAC ${target.mac}. Preview reads the current router flag and safeguards before you confirm. Blocking requires fresh connected inventory; unblock also supports configured targets absent from that inventory.`;
+    "Router controls off · setup in HA app Configuration" :
+    !target ? "This MAC is not configured for controls" : `Target MAC ${target.mac} · confirmation required`;
 }
 async function previewRouterAction(action) {
   if (routerActionBusy || !controlOptions?.router_enabled) return;
@@ -350,23 +357,25 @@ function renderClientDNS() {
     const row = document.createElement("tr");
     row.append(text("td", formatTime(q.ts)), text("td", `${q.domain || "Hidden"} · ${q.type || "—"}`),
       text("td", q.status || "Unknown"), text("td", `${q.reply || "Unknown"} · ${ms(q.reply_ms)}`)); body.append(row);
-    if (controlOptions?.dns_enabled && q.domain) {
-      const actions = document.createElement("div"); actions.className = "actions";
+    const cell = document.createElement("td");
+    if (q.domain) {
+      const actions = document.createElement("div"); actions.className = "actions dns-row-actions";
       for (const action of ["allow", "deny"]) {
         const label = action === "allow" ? "Allow" : "Deny";
         const button = text("button", `${label}…`);
         button.setAttribute("aria-label", `${label} ${q.domain} in configured kids groups`);
-        button.disabled = dnsActionBusy;
+        button.disabled = dnsActionBusy || !controlOptions?.dns_enabled;
+        if (button.disabled) button.title = controlError || dnsControlMessage();
         button.addEventListener("click", () => previewDNSAction(q.domain, action));
         actions.append(button);
       }
-      row.children[1].append(actions);
+      cell.append(actions);
     }
+    row.append(cell);
   }
-  $("client-dns-count").textContent = `${queries.length} matching / ${loadedDNS.queries.length} loaded (maximum ${loadedDNS.limit ?? 100}) · ${formatTime(loadedDNS.from)} – ${formatTime(loadedDNS.fetched)}. Search covers only this loaded snapshot, not full DNS history.`;
+  $("client-dns-count").textContent = `${queries.length} matching / ${loadedDNS.queries.length} loaded · ${formatTime(loadedDNS.from)} – ${formatTime(loadedDNS.fetched)} · loaded snapshot only (limit ${loadedDNS.limit ?? 100})`;
   if (!body.children.length) emptyRow(body, loadedDNS.queries.length ?
-    "No loaded queries match this search. Clear the search or load a newer snapshot." :
-    "No visible DNS requests in this binding window. This does not mean no activity.");
+    "No loaded queries match" : "No DNS queries in this binding window", 5);
 }
 function cancelDNSAction() {
   dnsActionRequest++;
@@ -374,12 +383,33 @@ function cancelDNSAction() {
   $("dns-action-confirmation").hidden = true;
   $("dns-action-status").textContent = "";
 }
+function dnsControlMessage() {
+  if (!controlOptions) return controlError || "Checking DNS controls…";
+  const dns = controlOptions.dns;
+  if (dns?.saved_settings === "different") return "Saved DNS settings differ from this running app · restart Linkwatch";
+  if (dns?.saved_settings === "invalid") return "Saved DNS settings invalid · check enabled flag and group-ID list";
+  if (controlOptions.dns_enabled) return `DNS controls on · groups ${dns?.group_ids.join(", ") || "configured"} · confirmation required`;
+  return ({groups_missing: "DNS controls off · no kids-group IDs configured",
+    connection_missing: "DNS controls off · Pi-hole connection missing",
+    collector_unavailable: "DNS controls unavailable · collector not running"})[dns?.reason] ||
+    "DNS controls off in the running app";
+}
 async function loadControlOptions() {
+  if (dnsActionBusy || routerActionBusy) return;
+  const request = ++controlRequest;
   try {
-    controlOptions = await api("api/controls");
-    $("dns-actions-setup").textContent = controlOptions.dns_enabled ?
-      "DNS actions create exact-domain rules for your configured kids groups, not this device alone. Use a row's Allow/Deny button to check membership, conflicts and impact before confirming." :
-      "DNS actions are off. Configure pihole_action_group_ids using existing non-Default kids groups, then enable pihole_actions_enabled in app Configuration. No memberships or Default-group rules are changed.";
+    const options = await api("api/controls");
+    if (request !== controlRequest || dnsActionBusy || routerActionBusy) return;
+    if (options.controls_schema !== 2) throw Error("App/UI version mismatch · update Linkwatch and reload");
+    if (controlOptions && (controlOptions.csrf !== options.csrf || controlOptions.dns_enabled !== options.dns_enabled ||
+        JSON.stringify(controlOptions.dns?.group_ids) !== JSON.stringify(options.dns?.group_ids))) {
+      if (!dnsActionBusy) cancelDNSAction();
+      if (!routerActionBusy) cancelRouterAction();
+    }
+    controlOptions = options; controlError = "";
+    $("dns-actions-setup").textContent = dnsControlMessage();
+    const dns = options.dns;
+    $("dns-control-diagnostic").textContent = `Running: enabled=${dns.enabled}; group IDs=[${dns.group_ids.join(", ")}]. Saved settings: ${{match: "match running app", different: "differ; restart needed", invalid: "invalid", unavailable: "not readable; restart status unknown"}[dns.saved_settings]}.`;
     renderClientDNS();
     $("router-recovery").hidden = !controlOptions.router_enabled;
     const targets = $("router-target"); targets.replaceChildren();
@@ -389,8 +419,13 @@ async function loadControlOptions() {
     if (controlOptions.router_targets?.length) targets.value = controlOptions.router_targets[0].key;
     renderRouterControls();
   } catch (error) {
-    controlOptions = null;
-    $("dns-actions-setup").textContent = `DNS action settings unavailable: ${error.message}. Read-only DNS still works.`;
+    if (request !== controlRequest || dnsActionBusy || routerActionBusy) return;
+    cancelDNSAction(); cancelRouterAction();
+    controlOptions = null; controlError = `Control settings unavailable: ${error.message}`;
+    $("dns-actions-setup").textContent = controlError;
+    $("dns-control-diagnostic").textContent = "Effective settings unavailable. Refresh controls; DNS reads remain available.";
+    $("router-recovery").hidden = true;
+    renderClientDNS(); renderRouterControls();
   }
 }
 async function previewDNSAction(domain, action) {
@@ -421,6 +456,10 @@ async function previewDNSAction(domain, action) {
 async function applyDNSAction() {
   const plan = dnsPlan, client = clientRequest, request = dnsActionRequest;
   if (dnsActionBusy || !plan || plan.key !== selectedClient) return;
+  if (!controlOptions?.dns_enabled) {
+    cancelDNSAction(); $("dns-action-status").textContent = "DNS control settings changed · refresh controls";
+    return;
+  }
   if (Date.now() >= plan.expires) {
     cancelDNSAction(); $("dns-action-status").textContent = "Confirmation expired. Preview the domain again.";
     return;
@@ -469,6 +508,7 @@ $("client-refresh").addEventListener("click", () => { if (selectedClient) openCl
 $("client-close").addEventListener("click", () => { cancelDNSAction(); cancelRouterAction(); clientRequest++; selectedClient = null; loadedDNS = null; $("client-detail").hidden = true; $("devices-title").focus(); });
 $("client-dns").addEventListener("click", loadClientDNS);
 $("client-dns-search").addEventListener("input", renderClientDNS);
+$("control-refresh").addEventListener("click", loadControlOptions);
 $("dns-action-cancel").addEventListener("click", cancelDNSAction);
 $("dns-action-apply").addEventListener("click", applyDNSAction);
 $("router-target-open").addEventListener("click", async () => {
@@ -482,10 +522,14 @@ $("router-unblock").addEventListener("click", () => previewRouterAction("unblock
 $("router-action-cancel").addEventListener("click", cancelRouterAction);
 $("router-action-apply").addEventListener("click", applyRouterAction);
 $("client-activity").addEventListener("click", loadClientActivity);
+$("catalog-retry").addEventListener("click", loadClientActivity);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && !dnsActionBusy && !routerActionBusy) loadControlOptions();
+});
 $("activity-window").addEventListener("change", () => {
   activityRequest++;
   $("client-activity-results").hidden = true;
-  $("client-activity-note").textContent = "Window changed. Load router traffic & activity for a new snapshot.";
+  $("client-activity-note").textContent = "Window changed · load traffic";
   $("client-activity").disabled = !activityAvailable();
 });
 $("discover-sensors").addEventListener("click", async () => {
